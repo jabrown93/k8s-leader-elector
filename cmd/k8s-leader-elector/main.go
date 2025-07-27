@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	apicorev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	coordination "k8s.io/client-go/kubernetes/typed/coordination/v1"
@@ -33,6 +34,7 @@ func main() {
 		retryPeriod   = flag.Duration("retry-period", 2*time.Second, "Retry period")
 		labelKey      = flag.String("label-key", "dns.jb.io/leader", "Label key to set on leader pod")
 		labelValue    = flag.String("label-value", "true", "Label value to set on leader pod")
+		leaderInfoCM  = flag.String("leader-info-cm", "pihole-leader-info", "ConfigMap name for leader info")
 	)
 	flag.Parse()
 
@@ -81,6 +83,33 @@ func main() {
 				if err != nil {
 					log.Printf("add label: %v", err)
 				}
+
+				cmClient := coreClient.ConfigMaps(ns)
+				cmName := *leaderInfoCM
+				cm, err := cmClient.Get(c, cmName, metav1.GetOptions{})
+				if err != nil {
+					cm = &apicorev1.ConfigMap{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: cmName,
+						},
+						Data: map[string]string{
+							"leaderPod": podName,
+						},
+					}
+					_, err = cmClient.Create(c, cm, metav1.CreateOptions{})
+					if err != nil {
+						log.Printf("create configmap: %v", err)
+					}
+				} else {
+					if cm.Data == nil {
+						cm.Data = map[string]string{}
+					}
+					cm.Data["leaderPod"] = podName
+					_, err = cmClient.Update(c, cm, metav1.UpdateOptions{})
+					if err != nil {
+						log.Printf("update configmap: %v", err)
+					}
+				}
 			},
 			OnStoppedLeading: func() {
 				log.Printf("%s: lost leadership", podName)
@@ -88,6 +117,33 @@ func main() {
 				_, err := coreClient.Pods(ns).Patch(context.Background(), podName, types.MergePatchType, patch, metav1.PatchOptions{})
 				if err != nil {
 					log.Printf("remove label: %v", err)
+				}
+
+				cmClient := coreClient.ConfigMaps(ns)
+				cmName := *leaderInfoCM
+				cm, err := cmClient.Get(context.Background(), cmName, metav1.GetOptions{})
+				if err != nil {
+					cm = &apicorev1.ConfigMap{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: cmName,
+						},
+						Data: map[string]string{
+							"leaderPod": "",
+						},
+					}
+					_, err = cmClient.Create(context.Background(), cm, metav1.CreateOptions{})
+					if err != nil {
+						log.Printf("create configmap: %v", err)
+					}
+				} else {
+					if cm.Data == nil {
+						cm.Data = map[string]string{}
+					}
+					cm.Data["leaderPod"] = ""
+					_, err = cmClient.Update(context.Background(), cm, metav1.UpdateOptions{})
+					if err != nil {
+						log.Printf("update configmap: %v", err)
+					}
 				}
 			},
 		},
