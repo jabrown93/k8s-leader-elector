@@ -12,6 +12,7 @@ docker-build:
 	docker buildx build \
 	  --platform=$(PLATFORMS) \
 	  -t $(REGISTRY)/$(APP):$(TAG) \
+	  -t $(REGISTRY)/$(APP):latest \
 	  .
 
 docker-push:
