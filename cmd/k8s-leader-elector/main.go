@@ -155,7 +155,7 @@ func main() {
 			OnStoppedLeading: func() {
 				log.Printf("%s: lost leadership", podName)
 				patch := []byte(`{"metadata":{"labels":{"` + *labelKey + `":null}}}`)
-				_, err := coreClient.Pods(context.Background(), podName, types.MergePatchType, patch, metav1.PatchOptions{})
+				_, err := coreClient.Pods(ns).Patch(context.Background(), podName, types.MergePatchType, patch, metav1.PatchOptions{})
 				if err != nil {
 					log.Printf("remove label: %v", err)
 				}
