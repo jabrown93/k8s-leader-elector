@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -54,6 +55,28 @@ func main() {
 		log.Fatalf("core client: %v", err)
 	}
 
+	// Removes the leader label from any pod that isn't the current pod.
+	cleanupStaleLeaderLabels := func(ctx context.Context, coreClient corev1.CoreV1Interface, ns, podName, labelKey, labelValue string) {
+		selector := fmt.Sprintf("%s=%s", labelKey, labelValue)
+		podList, err := coreClient.Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			log.Printf("list pods for stale label cleanup: %v", err)
+			return
+		}
+		for _, p := range podList.Items {
+			if p.Name == podName {
+				continue
+			}
+			patch := []byte(`{"metadata":{"labels":{"` + labelKey + `":null}}}`)
+			_, err := coreClient.Pods(ns).Patch(ctx, p.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+			if err != nil {
+				log.Printf("cleanup stale label on pod %s: %v", p.Name, err)
+			} else {
+				log.Printf("removed stale leader label from pod %s", p.Name)
+			}
+		}
+	}
+
 	lock, err := resourcelock.New(
 		resourcelock.LeasesResourceLock,
 		ns,
@@ -83,6 +106,24 @@ func main() {
 				if err != nil {
 					log.Printf("add label: %v", err)
 				}
+
+				// Ensure only one pod has the leader label by cleaning up others once,
+				// then periodically while we hold leadership.
+				cleanupStaleLeaderLabels(c, coreClient, ns, podName, *labelKey, *labelValue)
+
+				// Periodically enforce single-leader label while we are leader.
+				go func() {
+					t := time.NewTicker(10 * time.Second)
+					defer t.Stop()
+					for {
+						select {
+						case <-c.Done():
+							return
+						case <-t.C:
+							cleanupStaleLeaderLabels(c, coreClient, ns, podName, *labelKey, *labelValue)
+						}
+					}
+				}()
 
 				cmClient := coreClient.ConfigMaps(ns)
 				cmName := *leaderInfoCM
@@ -114,7 +155,7 @@ func main() {
 			OnStoppedLeading: func() {
 				log.Printf("%s: lost leadership", podName)
 				patch := []byte(`{"metadata":{"labels":{"` + *labelKey + `":null}}}`)
-				_, err := coreClient.Pods(ns).Patch(context.Background(), podName, types.MergePatchType, patch, metav1.PatchOptions{})
+				_, err := coreClient.Pods(context.Background(), podName, types.MergePatchType, patch, metav1.PatchOptions{})
 				if err != nil {
 					log.Printf("remove label: %v", err)
 				}
