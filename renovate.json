@@ -1,0 +1,111 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+
+  "extends": [
+    "config:base",
+    ":semanticCommits",
+    "helpers:pinGitHubActionDigests"
+  ],
+
+  "timezone": "America/Los_Angeles",
+  "dependencyDashboard": true,
+  "rebaseWhen": "behind-base-branch",
+  "rangeStrategy": "replace",
+  "prCreation": "immediate",
+  "automerge": false,
+  "commitBodyTable": true,
+  "prHourlyLimit": 10,
+  "configMigration": true,
+  "dependencyDashboardOSVVulnerabilitySummary": "all",
+
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodUpdateImportPaths"
+  ],
+
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "gomod (minor/patch)",
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "gomod (major)",
+      "automerge": false,
+      "labels": ["renovate-major", "gomod"]
+    },
+    {
+      "description": "Update `go` directive in go.mod (e.g., 1.22 → 1.23)",
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "versioning": "go-mod-directive",
+      "rangeStrategy": "bump",
+      "groupName": "Go toolchain (go.mod)",
+      "automerge": false,
+      "labels": ["go-version"]
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "docker images (minor/patch)",
+      "automerge": false
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "docker images (major)",
+      "automerge": false,
+      "labels": ["renovate-major", "docker"]
+    },
+    {
+      "matchManagers": ["docker-compose"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "compose images (minor/patch)",
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "matchManagers": ["docker-compose"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "compose images (major)",
+      "automerge": false,
+      "labels": ["renovate-major", "compose"]
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    }
+  ],
+
+  "regexManagers": [
+    {
+      "description": "asdf .tool-versions → golang X.Y[.Z]",
+      "fileMatch": ["(^|/)\\.tool-versions$"],
+      "matchStrings": ["(?m)^golang\\s+(?<currentValue>\\S+)$"],
+      "depNameTemplate": "golang",
+      "datasourceTemplate": "golang-version",
+      "versioningTemplate": "go",
+      "groupName": "Go toolchain (asdf)",
+      "labels": ["go-version"]
+    },
+    {
+      "description": "goenv .go-version → X.Y[.Z]",
+      "fileMatch": ["(^|/)\\.go-version$"],
+      "matchStrings": ["(?<currentValue>\\S+)"],
+      "depNameTemplate": "golang",
+      "datasourceTemplate": "golang-version",
+      "versioningTemplate": "go",
+      "groupName": "Go toolchain (goenv)",
+      "labels": ["go-version"]
+    }
+  ]
+}
