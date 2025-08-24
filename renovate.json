@@ -2,8 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended",
-    ":semanticCommits",
-    "helpers:pinGitHubActionDigests"
+    ":semanticCommits"
   ],
   "timezone": "America/Los_Angeles",
   "dependencyDashboard": true,
