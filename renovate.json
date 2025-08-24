@@ -93,9 +93,7 @@
       "matchStrings": ["(?m)^golang\\s+(?<currentValue>\\S+)$"],
       "depNameTemplate": "golang",
       "datasourceTemplate": "golang-version",
-      "versioningTemplate": "go",
-      "groupName": "Go toolchain (asdf)",
-      "labels": ["go-version"]
+      "versioningTemplate": "go"
     },
     {
       "description": "goenv .go-version → X.Y[.Z]",
@@ -103,9 +101,7 @@
       "matchStrings": ["(?<currentValue>\\S+)"],
       "depNameTemplate": "golang",
       "datasourceTemplate": "golang-version",
-      "versioningTemplate": "go",
-      "groupName": "Go toolchain (goenv)",
-      "labels": ["go-version"]
+      "versioningTemplate": "go"
     }
   ]
 }
