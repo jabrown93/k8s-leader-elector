@@ -1,19 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended",
-    ":semanticCommits"
-  ],
-  "timezone": "America/Los_Angeles",
-  "dependencyDashboard": true,
-  "rebaseWhen": "behind-base-branch",
-  "rangeStrategy": "replace",
-  "prCreation": "immediate",
-  "automerge": false,
-  "commitBodyTable": true,
-  "prHourlyLimit": 10,
-  "configMigration": true,
-  "dependencyDashboardOSVVulnerabilitySummary": "all",
+  "extends": ["github>jabrown93/.github//renovate-config.json"]
   "postUpdateOptions": [
     "gomodTidy",
     "gomodUpdateImportPaths"
@@ -61,69 +48,6 @@
       "labels": [
         "go-version"
       ]
-    },
-    {
-      "matchManagers": [
-        "dockerfile"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest"
-      ],
-      "groupName": "docker images (minor/patch)",
-      "automerge": false
-    },
-    {
-      "matchManagers": [
-        "dockerfile"
-      ],
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "groupName": "docker images (major)",
-      "automerge": false,
-      "labels": [
-        "renovate-major",
-        "docker"
-      ]
-    },
-    {
-      "matchManagers": [
-        "docker-compose"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest"
-      ],
-      "groupName": "compose images (minor/patch)",
-      "automerge": true,
-      "automergeType": "pr",
-      "automergeStrategy": "squash"
-    },
-    {
-      "matchManagers": [
-        "docker-compose"
-      ],
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "groupName": "compose images (major)",
-      "automerge": false,
-      "labels": [
-        "renovate-major",
-        "compose"
-      ]
-    },
-    {
-      "matchManagers": [
-        "github-actions"
-      ],
-      "groupName": "GitHub Actions",
-      "automerge": true,
-      "automergeType": "pr",
-      "automergeStrategy": "squash"
     }
   ],
   "customManagers": [
