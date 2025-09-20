@@ -33,7 +33,7 @@ func main() {
 		leaseDur      = flag.Duration("lease-duration", 15*time.Second, "Lease duration")
 		renewDeadline = flag.Duration("renew-deadline", 10*time.Second, "Renew deadline")
 		retryPeriod   = flag.Duration("retry-period", 2*time.Second, "Retry period")
-		labelKey      = flag.String("label-key", "dns.jb.io/leader", "Label key to set on leader pod")
+		labelKey      = flag.String("label-key", "dns.jaredbrown.io/leader", "Label key to set on leader pod")
 		labelValue    = flag.String("label-value", "true", "Label value to set on leader pod")
 		leaderInfoCM  = flag.String("leader-info-cm", "pihole-leader-info", "ConfigMap name for leader info")
 	)
@@ -53,28 +53,6 @@ func main() {
 	coreClient, err := corev1.NewForConfig(cfg)
 	if err != nil {
 		log.Fatalf("core client: %v", err)
-	}
-
-	// Removes the leader label from any pod that isn't the current pod.
-	cleanupStaleLeaderLabels := func(ctx context.Context, coreClient corev1.CoreV1Interface, ns, podName, labelKey, labelValue string) {
-		selector := fmt.Sprintf("%s=%s", labelKey, labelValue)
-		podList, err := coreClient.Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
-		if err != nil {
-			log.Printf("list pods for stale label cleanup: %v", err)
-			return
-		}
-		for _, p := range podList.Items {
-			if p.Name == podName {
-				continue
-			}
-			patch := []byte(`{"metadata":{"labels":{"` + labelKey + `":null}}}`)
-			_, err := coreClient.Pods(ns).Patch(ctx, p.Name, types.MergePatchType, patch, metav1.PatchOptions{})
-			if err != nil {
-				log.Printf("cleanup stale label on pod %s: %v", p.Name, err)
-			} else {
-				log.Printf("removed stale leader label from pod %s", p.Name)
-			}
-		}
 	}
 
 	lock, err := resourcelock.New(
@@ -108,19 +86,18 @@ func main() {
 				}
 
 				// Ensure only one pod has the leader label by cleaning up others once,
-				// then periodically while we hold leadership.
-				cleanupStaleLeaderLabels(c, coreClient, ns, podName, *labelKey, *labelValue)
+				cleanupToLeaseHolder(c, coreClient, coordClient, ns, *electionID, *labelKey, *labelValue)
 
 				// Periodically enforce single-leader label while we are leader.
 				go func() {
-					t := time.NewTicker(10 * time.Second)
+					t := time.NewTicker(5 * time.Second)
 					defer t.Stop()
 					for {
 						select {
 						case <-c.Done():
 							return
 						case <-t.C:
-							cleanupStaleLeaderLabels(c, coreClient, ns, podName, *labelKey, *labelValue)
+							cleanupToLeaseHolder(c, coreClient, coordClient, ns, *electionID, *labelKey, *labelValue)
 						}
 					}
 				}()
@@ -189,4 +166,42 @@ func main() {
 			},
 		},
 	})
+}
+
+// helper to read current lease holder
+func getLeaseHolder(ctx context.Context, coord coordination.CoordinationV1Interface, ns, leaseName string) (string, error) {
+	lease, err := coord.Leases(ns).Get(ctx, leaseName, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	if lease.Spec.HolderIdentity == nil {
+		return "", nil
+	}
+	return *lease.Spec.HolderIdentity, nil
+}
+
+// change cleanup to remove label from any pod that isn't the *actual* lease holder
+func cleanupToLeaseHolder(ctx context.Context, core corev1.CoreV1Interface, coord coordination.CoordinationV1Interface, ns, leaseName, labelKey, labelValue string) {
+	holder, err := getLeaseHolder(ctx, coord, ns, leaseName)
+	if err != nil {
+		log.Printf("read lease holder: %v", err)
+		return
+	}
+	selector := fmt.Sprintf("%s=%s", labelKey, labelValue)
+	podList, err := core.Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		log.Printf("list pods for cleanup: %v", err)
+		return
+	}
+	for _, p := range podList.Items {
+		if p.Name == holder {
+			continue
+		}
+		patch := []byte(`{"metadata":{"labels":{"` + labelKey + `":null}}}`)
+		if _, err := core.Pods(ns).Patch(ctx, p.Name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+			log.Printf("remove stale leader label from %s: %v", p.Name, err)
+		} else {
+			log.Printf("removed stale leader label from %s (holder=%s)", p.Name, holder)
+		}
+	}
 }
