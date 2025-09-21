@@ -6,9 +6,9 @@ PLATFORMS=linux/amd64,linux/arm64
 .PHONY: build docker-build docker-push
 
 build:
-	go build -o bin/$(APP) ./cmd/k8s-leader-elector
+	mvn clean install
 
-docker-build:
+docker-build: build
 	docker buildx build \
 	  --platform=$(PLATFORMS) \
 	  -t $(REGISTRY)/$(APP):$(TAG) \

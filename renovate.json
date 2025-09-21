@@ -1,6 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>jabrown93/.github//renovate-config.json"],
+  "extends": [
+    "github>jabrown93/.github//renovate-config.json"
+  ],
   "postUpdateOptions": [
     "gomodTidy",
     "gomodUpdateImportPaths"
@@ -8,74 +10,63 @@
   "packageRules": [
     {
       "matchManagers": [
-        "gomod"
+        "maven"
       ],
       "matchUpdateTypes": [
         "minor",
         "patch"
       ],
-      "groupName": "gomod (minor/patch)",
+      "groupName": "maven (minor/patch)",
       "automerge": true,
       "automergeType": "pr",
       "automergeStrategy": "squash"
     },
     {
       "matchManagers": [
-        "gomod"
+        "maven"
       ],
       "matchUpdateTypes": [
         "major"
       ],
-      "groupName": "gomod (major)",
+      "groupName": "maven (major)",
       "automerge": false,
       "labels": [
         "renovate-major",
-        "gomod"
+        "maven"
       ]
     },
     {
-      "description": "Update `go` directive in go.mod (e.g., 1.22 → 1.23)",
-      "matchManagers": [
-        "gomod"
+      "matchDatasources": [
+        "docker"
       ],
       "matchDepNames": [
-        "go"
+        "amazoncorretto"
       ],
-      "versioning": "go-mod-directive",
-      "rangeStrategy": "bump",
-      "groupName": "Go toolchain (go.mod)",
-      "automerge": false,
-      "labels": [
-        "go-version"
-      ]
-    }
-  ],
-  "customManagers": [
-    {
-      "customType": "regex",
-      "description": "asdf .tool-versions → golang X.Y[.Z]",
-      "managerFilePatterns": [
-        "/(^|/)\\.tool-versions$/"
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
       ],
-      "matchStrings": [
-        "(?m)^golang\\s+(?<currentValue>\\S+)$"
-      ],
-      "depNameTemplate": "golang",
-      "datasourceTemplate": "golang-version",
-      "versioningTemplate": "go"
+      "groupName": "base image (amazoncorretto)",
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
     },
     {
-      "customType": "regex",
-      "description": "goenv .go-version → X.Y[.Z]",
-      "managerFilePatterns": [
-        "/(^|/)\\.go-version$/"
+      "matchDatasources": [
+        "docker"
       ],
-      "matchStrings": [
-        "(?<currentValue>\\S+)"
+      "matchDepNames": [
+        "amazoncorretto"
       ],
-      "depNameTemplate": "golang",
-      "datasourceTemplate": "golang-version",
-      "versioningTemplate": "go"
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": "base image (amazoncorretto major)",
+      "automerge": false,
+      "labels": [
+        "renovate-major",
+        "docker"
+      ]
     }
   ]
 }

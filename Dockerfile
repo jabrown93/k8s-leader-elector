@@ -1,10 +1,6 @@
-FROM golang:1.25 AS build
-WORKDIR /src
-COPY go.mod ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /k8s-leader-elector ./cmd/k8s-leader-elector
+FROM amazoncorretto:25.0.0-alpine3.22 AS runtime
 
-FROM gcr.io/distroless/base-debian12:latest
-COPY --from=build /k8s-leader-elector /k8s-leader-elector
-ENTRYPOINT ["/k8s-leader-elector"]
+COPY target/*-shaded.jar /app/leader-elector.jar
+WORKDIR /app
+
+ENTRYPOINT ["java", "-jar", "/app/leader-elector.jar"]
