@@ -74,9 +74,6 @@ public class LeadershipService {
         // 6) Run leader election in the foreground (blocks)
         //    If you prefer non-blocking, spawn on an executor.
         while (true) {
-            if (leader) {
-                continue;
-            }
             log.info("Attempting to acquire leadership on node: " + podName);
             try (final LeaderElector elector = new LeaderElector(config)) {
                 elector.run(onStartLeading, onStopLeading);

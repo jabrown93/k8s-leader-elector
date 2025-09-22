@@ -22,7 +22,7 @@ public class LeaderLabelerApp {
                     .cluster()
                     .build();
         } catch (final Exception error) {
-            log.error("Error while initializing KubernetesClient", error);
+            log.warn("Error while initializing KubernetesClient, using user kube config: {}", error.getMessage(), error);
             final String kubeConfigPath = System.getProperty("kubeconfig",
                                                              System.getProperty("user.home") + "/.kube/config");
             client = ClientBuilder

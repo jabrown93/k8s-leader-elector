@@ -35,3 +35,4 @@ go.work.sum
 
 # macOS
 .DS_Store
+**/target/
