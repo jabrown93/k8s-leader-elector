@@ -11,6 +11,8 @@ import io.kubernetes.client.openapi.models.V1Pod;
 import io.kubernetes.client.util.ClientBuilder;
 import io.kubernetes.client.util.KubeConfig;
 import io.kubernetes.client.util.PatchUtils;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.FileReader;
@@ -18,6 +20,7 @@ import java.io.IOException;
 import java.time.Duration;
 
 @Slf4j
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class LeaderLabelerApp {
 
     static void main() throws IOException {
@@ -26,7 +29,8 @@ public class LeaderLabelerApp {
             client = ClientBuilder
                     .cluster()
                     .build();
-        } catch (final Exception e) {
+        } catch (final Exception error) {
+            log.error("Error while initializing KubernetesClient", error);
             final String kubeConfigPath = System.getProperty("kubeconfig",
                                                              System.getProperty("user.home") + "/.kube/config");
             client = ClientBuilder
