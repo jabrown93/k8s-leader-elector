@@ -13,9 +13,9 @@
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <main.class>io.jaredbrown.leader.LeaderLabelerApp</main.class>
-        <client-java.version>24.0.0</client-java.version>
-        <log4j.version>2.25.1</log4j.version>
-        <slf4j-api.version>2.0.9</slf4j-api.version>
+        <client-java.version>24.0.0-legacy</client-java.version>
+        <log4j.version>2.25.2</log4j.version>
+        <slf4j-api.version>2.0.17</slf4j-api.version>
         <lombok.version>1.18.42</lombok.version>
     </properties>
 
@@ -63,7 +63,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.13.0</version>
+                <version>3.14.1</version>
                 <configuration>
                     <release>${maven.compiler.source}</release>
                     <annotationProcessorPaths>
@@ -92,7 +92,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-dependency-plugin</artifactId>
-                <version>3.6.1</version>
+                <version>3.8.1</version>
                 <executions>
                     <execution>
                         <id>copy-runtime-dependencies</id>
