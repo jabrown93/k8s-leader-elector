@@ -5,33 +5,36 @@ import io.kubernetes.client.extended.leaderelection.LeaderElectionConfig;
 import io.kubernetes.client.extended.leaderelection.LeaderElector;
 import io.kubernetes.client.extended.leaderelection.resourcelock.LeaseLock;
 import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.openapi.Configuration;
 import io.kubernetes.client.openapi.apis.CoreV1Api;
+import io.kubernetes.client.openapi.models.V1Pod;
 import io.kubernetes.client.util.ClientBuilder;
 import io.kubernetes.client.util.KubeConfig;
+import io.kubernetes.client.util.PatchUtils;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.FileReader;
+import java.io.IOException;
 import java.time.Duration;
 
 @Slf4j
 public class LeaderLabelerApp {
-    private static final String LEADER_LABEL_VAL_TRUE = "true";
 
-    public static void main(final String[] args) throws Exception {
-        // 1) Build client (in-cluster first, fall back to local kubeconfig)
+    static void main() throws IOException {
         ApiClient client;
         try {
             client = ClientBuilder
                     .cluster()
                     .build();
         } catch (final Exception e) {
-            // fallback for local testing
             final String kubeConfigPath = System.getProperty("kubeconfig",
                                                              System.getProperty("user.home") + "/.kube/config");
             client = ClientBuilder
-                    .kubeconfig(KubeConfig.loadKubeConfig(new java.io.FileReader(kubeConfigPath)))
+                    .kubeconfig(KubeConfig.loadKubeConfig(new FileReader(kubeConfigPath)))
                     .build();
         }
-        io.kubernetes.client.openapi.Configuration.setDefaultApiClient(client);
+        final ApiClient apiClient = client;
+        Configuration.setDefaultApiClient(client);
 
         // 2) Resolve identity and namespace from Downward API
         final String podName = envOrThrow("POD_NAME");
@@ -50,32 +53,42 @@ public class LeaderLabelerApp {
 
         final LeaseLock lock = new LeaseLock(leaseNamespace, leaseName, podName, client);
         final LeaderElectionConfig config = new LeaderElectionConfig(lock, leaseDuration, renewDeadline, retryPeriod);
-        final CoreV1Api core = new CoreV1Api();
+        final CoreV1Api core = new CoreV1Api(client);
 
         // 5) Hooks: label on start, remove on stop
         final Runnable onStartLeading = () -> {
             try {
                 // JSON Merge Patch to add/update the label
-                final String patch = "{ \"metadata\": { \"labels\": { \"" + labelKey + "\": \"" + LEADER_LABEL_VAL_TRUE + "\" } } }";
-                core.patchNamespacedPod(podName, podNamespace, new V1Patch(patch));
-                System.out.println("✅ Gained leadership. Labeled " + podName + " as leader.");
+                final String body = "{ \"metadata\": { \"labels\": { \"" + labelKey + "\": \"true\" } } }";
+
+                PatchUtils.patch(V1Pod.class,
+                                 () -> core
+                                         .patchNamespacedPod(podName, podNamespace, new V1Patch(body))
+                                         .buildCall(null),
+                                 V1Patch.PATCH_FORMAT_STRATEGIC_MERGE_PATCH,
+                                 apiClient);
+
+                log.info("✅ Gained leadership. Labeled " + podName + " as leader.");
             } catch (final Exception e) {
-                System.err.println("Failed to label pod as leader: " + e.getMessage());
+                log.error("Failed to label pod as leader: " + e.getMessage());
                 // If we cannot label, better to relinquish leadership to avoid split-brain
-                throw new RuntimeException(e);
+                throw new IllegalStateException(e);
             }
         };
 
         final Runnable onStopLeading = () -> {
             try {
-                // Use JSON Patch to remove the label safely (doesn't clobber other labels)
-                final String jsonPatch = "[ { \"op\": \"remove\", \"path\": \"/metadata/labels/" + escapeJsonPointer(
-                        labelKey) + "\" } ]";
-                core.patchNamespacedPod(podName, podNamespace, new V1Patch(jsonPatch));
-                System.out.println("🛑 Lost leadership. Removed leader label from " + podName + ".");
+                final String body = "{ \"metadata\": { \"labels\": { \"" + labelKey + "\": \"false\" } } }";
+
+                PatchUtils.patch(V1Pod.class,
+                                 () -> core
+                                         .patchNamespacedPod(podName, podNamespace, new V1Patch(body))
+                                         .buildCall(null),
+                                 V1Patch.PATCH_FORMAT_STRATEGIC_MERGE_PATCH,
+                                 apiClient);
+                log.info("🛑 Lost leadership. Set leader label on " + podName + " to false.");
             } catch (final Exception e) {
-                // If the label isn't there anymore or removal fails, just log and continue.
-                System.err.println("Warning removing leader label (likely already gone): " + e.getMessage());
+                log.error("Failed to unlabel pod as leader: " + e.getMessage());
             }
         };
 
@@ -92,12 +105,5 @@ public class LeaderLabelerApp {
             throw new IllegalArgumentException("Missing env var: " + key);
         }
         return v;
-    }
-
-    // RFC6901 JSON Pointer escaping for label key in JSON Patch path
-    private static String escapeJsonPointer(final String key) {
-        return key
-                .replace("~", "~0")
-                .replace("/", "~1");
     }
 }
