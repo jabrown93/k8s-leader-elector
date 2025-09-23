@@ -3,70 +3,12 @@
   "extends": [
     "github>jabrown93/.github//renovate-config.json"
   ],
-  "postUpdateOptions": [
-    "gomodTidy",
-    "gomodUpdateImportPaths"
-  ],
   "packageRules": [
     {
       "matchManagers": [
         "maven"
       ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch"
-      ],
-      "groupName": "maven (minor/patch)",
-      "automerge": true,
-      "automergeType": "pr",
-      "automergeStrategy": "squash"
-    },
-    {
-      "matchManagers": [
-        "maven"
-      ],
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "groupName": "maven (major)",
-      "automerge": false,
-      "labels": [
-        "renovate-major",
-        "maven"
-      ]
-    },
-    {
-      "matchDatasources": [
-        "docker"
-      ],
-      "matchDepNames": [
-        "amazoncorretto"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch"
-      ],
-      "groupName": "base image (amazoncorretto)",
-      "automerge": true,
-      "automergeType": "pr",
-      "automergeStrategy": "squash"
-    },
-    {
-      "matchDatasources": [
-        "docker"
-      ],
-      "matchDepNames": [
-        "amazoncorretto"
-      ],
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "groupName": "base image (amazoncorretto major)",
-      "automerge": false,
-      "labels": [
-        "renovate-major",
-        "docker"
-      ]
+      "allowedVersions": "!/.*-legacy$/"
     }
   ]
 }
