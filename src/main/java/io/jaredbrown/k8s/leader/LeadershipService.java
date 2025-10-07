@@ -1,4 +1,4 @@
-package io.jaredbrown.leader;
+package io.jaredbrown.k8s.leader;
 
 import io.kubernetes.client.custom.V1Patch;
 import io.kubernetes.client.extended.leaderelection.LeaderElectionConfig;
@@ -11,6 +11,8 @@ import io.kubernetes.client.util.PatchUtils;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
 
 @Slf4j
 public class LeadershipService {
@@ -23,6 +25,9 @@ public class LeadershipService {
     private final String leaseNamespace;
 
     private boolean leader;
+
+    private static final long MIN_RETRY_MS = 1_000L;
+    private static final long MAX_RETRY_MS = 5_000L;
 
     public LeadershipService(final ApiClient client) {
         this.client = client;
@@ -42,8 +47,8 @@ public class LeadershipService {
 
     public void start() {
         // 4) Configure timings (tune for your needs)
-        final Duration leaseDuration = Duration.ofSeconds(120);   // total lease time
-        final Duration renewDeadline = Duration.ofSeconds(30);   // must renew within this window
+        final Duration leaseDuration = Duration.ofSeconds(60);   // total lease time
+        final Duration renewDeadline = Duration.ofSeconds(15);   // must renew within this window
         final Duration retryPeriod = Duration.ofSeconds(5);    // retry interval
 
         final LeaseLock lock = new LeaseLock(leaseNamespace, leaseName, podName, client);
@@ -71,16 +76,50 @@ public class LeadershipService {
             }
         };
 
+        // Consumer invoked when a new leader is observed. Ensure we unlabel ourselves if it's not us.
+        final Consumer<String> newLeaderConsumer = newLeaderId -> {
+            try {
+                // If we observe a different leader and we still consider ourselves leader, unlabel.
+                if (!podName.equals(newLeaderId)) {
+                    log.info("Observed new leader {} different from {} - clearing local leader label if it exists",
+                             newLeaderId,
+                             podName);
+                    this.leader = false;
+                    upsertLabel();
+                }
+            } catch (final Exception e) {
+                log.error("Error handling new leader notification: {}", e.getMessage(), e);
+            }
+        };
+
         // 6) Run leader election in the foreground (blocks)
         //    If you prefer non-blocking, spawn on an executor.
-        while (true) {
-            log.info("Attempting to acquire leadership on node: " + podName);
+        // 6) Run leader election in the foreground (blocks)
+        while (!Thread
+                .currentThread()
+                .isInterrupted()) {
+            log.info("Attempting to acquire leadership on node: {}", podName);
             try (final LeaderElector elector = new LeaderElector(config)) {
-                elector.run(onStartLeading, onStopLeading);
+                // blocks until leadership lost or elector stops
+                elector.run(onStartLeading, onStopLeading, newLeaderConsumer);
             } catch (final RuntimeException e) {
                 log.error("Leader election error: {}", e.getMessage(), e);
             }
 
+            // Backoff with jitter after elector exits (normal or error) to allow failover
+            final long sleepMs = ThreadLocalRandom
+                    .current()
+                    .nextLong(MIN_RETRY_MS, MAX_RETRY_MS + 1);
+            log.info("LeaderElector exited; sleeping {}ms before next attempt to allow failover", sleepMs);
+            try {
+                Thread.sleep(sleepMs);
+            } catch (final InterruptedException ie) {
+                Thread
+                        .currentThread()
+                        .interrupt();
+                log.info("Interrupted while sleeping after elector exit; stopping leadership loop");
+                break;
+            }
         }
     }
 

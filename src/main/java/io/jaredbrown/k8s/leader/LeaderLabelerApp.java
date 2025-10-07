@@ -1,4 +1,4 @@
-package io.jaredbrown.leader;
+package io.jaredbrown.k8s.leader;
 
 import io.kubernetes.client.openapi.ApiClient;
 import io.kubernetes.client.openapi.Configuration;
