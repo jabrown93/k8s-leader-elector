@@ -46,7 +46,17 @@ public class ElectorService implements SmartLifecycle {
         running = false;
         cancelRefreshTask();
         releaseLockIfHeld();
-        scheduler.shutdownNow();
+        scheduler.shutdown();
+        try {
+            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                log.warn("Scheduler did not terminate in time, forcing shutdown");
+                scheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            log.warn("Interrupted while waiting for scheduler termination, forcing shutdown");
+            scheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override
