@@ -1,13 +1,11 @@
 package io.jaredbrown.k8s.leader.elector;
 
 import lombok.Data;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
 
 @Data
-@Slf4j
 @ConfigurationProperties(prefix = "elector")
 public class ElectorProperties {
     private String labelKey;
