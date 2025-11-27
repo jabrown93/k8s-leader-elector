@@ -50,13 +50,12 @@ public class LockCallbacks {
         log.info("### Lock acquired – starting protected work");
 
         final String namespace = kubernetesClient.getNamespace();
-        final String appName = environment.getProperty("spring.application.name", "k8s-leader-elector");
 
         try {
             final List<Pod> podList = kubernetesClient
                     .pods()
                     .inNamespace(namespace)
-                    .withLabel("app", appName)
+                    .withLabel("app", electorProperties.getAppName())
                     .list()
                     .getItems();
 
