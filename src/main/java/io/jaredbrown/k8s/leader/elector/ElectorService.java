@@ -22,7 +22,7 @@ public class ElectorService implements SmartLifecycle {
     private final LockCallbacks callbacks;
     private final ElectorProperties electorProperties;
     private final RedisLockRegistry lockRegistry;
-    private DistributedLock lock;
+    private volatile DistributedLock lock;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "lock-manager");
