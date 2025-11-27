@@ -38,7 +38,7 @@ public class LockCallbacks {
                         pod.setMetadata(metadata);
                         return pod;
                     });
-            log.info("Set {}}={} on pod {}", electorProperties.getLabelKey(), isLeader, podName);
+            log.info("Set {}={} on pod {}", electorProperties.getLabelKey(), isLeader, podName);
         } catch (final Exception e) {
             log.error("Failed to update leader label on pod {}", podName, e);
         }
