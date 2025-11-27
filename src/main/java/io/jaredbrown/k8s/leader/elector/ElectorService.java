@@ -31,7 +31,7 @@ public class ElectorService implements SmartLifecycle {
     });
 
     private volatile boolean running = false;
-    private ScheduledFuture<?> refreshFuture;
+    private volatile ScheduledFuture<?> refreshFuture;
 
     @Override
     public void start() {
