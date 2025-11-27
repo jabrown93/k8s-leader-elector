@@ -90,7 +90,7 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
-    // --- Refresh logic: every 5 minutes ---
+    // --- Refresh logic: interval is configurable via electorProperties.getRenewDeadline() ---
 
     private void scheduleRefreshTask() {
         cancelRefreshTask(); // in case there is an old one
