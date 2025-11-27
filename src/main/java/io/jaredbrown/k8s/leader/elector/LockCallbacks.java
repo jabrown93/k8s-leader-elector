@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;
-import org.springframework.core.env.Environment;
 
 import java.util.HashMap;
 import java.util.List;
@@ -19,7 +18,6 @@ import java.util.Map;
 public class LockCallbacks {
     private final ElectorProperties electorProperties;
     private final KubernetesClient kubernetesClient;
-    private final Environment environment;
     @Value("${POD_NAME:unknown}")
     private String selfPodName;
 
