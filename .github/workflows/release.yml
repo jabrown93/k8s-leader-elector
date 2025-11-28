@@ -41,6 +41,9 @@ jobs:
       id: vars
       run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
+    - name: Run maven install
+      run: mvn clean install
+
     - name: Build and push Docker image
       uses: docker/build-push-action@v6.18.0
       with:
