@@ -1,8 +1,7 @@
-FROM amazoncorretto:25.0.0-alpine3.22 AS runtime
+FROM amazoncorretto:25.0.0-alpine3.22
 
-COPY target/*.jar /app/leader-elector.jar
-COPY target/lib/ /app/lib/
+COPY target/leader-elector-*.jar /app/leader-elector.jar
 
 WORKDIR /app
 
-ENTRYPOINT ["java", "-jar", "/app/leader-elector.jar"]
+ENTRYPOINT ["java", "-jar", "leader-elector.jar"]
