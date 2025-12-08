@@ -28,8 +28,8 @@ go.work.sum
 .env
 
 # Editor/IDE
- .idea
- *.iml
+.idea/
+*.iml
 # .vscode/
 
 # macOS

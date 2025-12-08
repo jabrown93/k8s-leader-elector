@@ -1,67 +1,57 @@
 package io.jaredbrown.k8s.leader.elector;
 
+import jakarta.annotation.Nonnull;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.integration.redis.util.RedisLockRegistry;
 import org.springframework.integration.support.locks.DistributedLock;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor(onConstructor_ = @Autowired)
+@RequiredArgsConstructor
 public class ElectorService implements SmartLifecycle {
+    @Nonnull
     private final LockCallbacks callbacks;
+    @Nonnull
     private final ElectorProperties electorProperties;
+    @Nonnull
     private final RedisLockRegistry lockRegistry;
-    private volatile DistributedLock lock;
+    @Nonnull
+    private final TaskScheduler taskScheduler;
 
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "lock-manager");
-        t.setDaemon(true);
-        return t;
-    });
-
-    private volatile boolean running = false;
-    private volatile ScheduledFuture<?> refreshFuture;
+    private final AtomicReference<DistributedLock> lock = new AtomicReference<>();
+    private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicReference<ScheduledFuture<?>> refreshFuture = new AtomicReference<>();
 
     @Override
     public void start() {
-        running = true;
-        log.info("Starting DistributedLockManager");
-        scheduler.submit(this::lockLoop);
+        running.set(true);
+        log.info("Starting ElectorService");
+        taskScheduler.schedule(this::lockLoop, Instant.now());
     }
 
     @Override
     public void stop() {
-        log.info("Stopping DistributedLockManager");
-        running = false;
+        log.info("Stopping ElectorService");
+        running.set(false);
         cancelRefreshTask();
         releaseLockIfHeld();
-        scheduler.shutdown();
-        try {
-            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                log.warn("Scheduler did not terminate in time, forcing shutdown");
-                scheduler.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            log.warn("Interrupted while waiting for scheduler termination, forcing shutdown");
-            scheduler.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
     }
 
     @Override
     public boolean isRunning() {
-        return running;
+        return running.get();
     }
 
     @PreDestroy
@@ -70,101 +60,110 @@ public class ElectorService implements SmartLifecycle {
         stop();
     }
 
-
-    private void lockLoop() {
-        while (running) {
-            try {
-                log.info("Attempting to acquire lock '{}' ...", electorProperties.getLockName());
-                lock = lockRegistry.obtain(electorProperties.getLockName());
-                final boolean acquired = lock.tryLock(electorProperties.getRetryPeriod(),
-                                                      electorProperties.getLeaseDuration());
-
-                if (acquired) {
-                    log.info("Lock '{}' acquired", electorProperties.getLockName());
-                    callbacks.onLockAcquired();
-                    scheduleRefreshTask();
-                    return;
-                } else {
-                    log.info("Could not acquire lock, will retry in {} seconds", electorProperties.getRetryPeriod());
-                }
-
-            } catch (final InterruptedException e) {
-                Thread
-                        .currentThread()
-                        .interrupt();
-                log.warn("Lock acquisition interrupted, exiting lock loop");
-                return;
-            } catch (final Exception e) {
-                log.error("Error while trying to acquire lock", e);
-            }
+    private void cancelRefreshTask() {
+        final ScheduledFuture<?> future = refreshFuture.getAndSet(null);
+        if (future != null && !future.isCancelled()) {
+            future.cancel(true);
         }
     }
 
     // --- Refresh logic: interval is configurable via electorProperties.getRenewDeadline() ---
 
-    private void scheduleRefreshTask() {
-        cancelRefreshTask(); // in case there is an old one
+    private void releaseLockIfHeld() {
+        final DistributedLock currentLock = lock.getAndSet(null);
+        if (currentLock != null) {
+            try {
+                log.info("Releasing lock '{}'", electorProperties.getLockName());
+                currentLock.unlock();
+            } catch (final Exception e) {
+                log.error("Error while releasing lock", e);
+            }
+        }
+    }
 
-        refreshFuture = scheduler.scheduleAtFixedRate(this::refreshLock,
-                                                      electorProperties.getRenewDeadline().getSeconds(),
-                                                      electorProperties.getRenewDeadline().getSeconds(),
-                                                      TimeUnit.SECONDS);
+    private void lockLoop() {
+        if (!running.get()) {
+            return;
+        }
+
+        try {
+            log.info("Attempting to acquire lock '{}'...", electorProperties.getLockName());
+            final DistributedLock newLock = lockRegistry.obtain(electorProperties.getLockName());
+            final boolean acquired = newLock.tryLock(electorProperties
+                                                       .getRetryPeriod()
+                                                       .getSeconds(), TimeUnit.SECONDS);
+
+            if (acquired) {
+                lock.set(newLock);
+                log.info("Lock '{}' acquired", electorProperties.getLockName());
+                callbacks.onLockAcquired();
+                scheduleRefreshTask();
+            } else {
+                log.info("Could not acquire lock, will retry in {}", electorProperties.getRetryPeriod());
+                taskScheduler.schedule(this::lockLoop,
+                                       Instant
+                                               .now()
+                                               .plus(electorProperties.getRetryPeriod()));
+            }
+        } catch (final InterruptedException e) {
+            Thread
+                    .currentThread()
+                    .interrupt();
+            log.warn("Lock acquisition interrupted, exiting lock loop", e);
+        } catch (final Exception e) {
+            log.error("Error while trying to acquire lock, retrying in {}", electorProperties.getRetryPeriod(), e);
+            if (running.get()) {
+                taskScheduler.schedule(this::lockLoop,
+                                       Instant
+                                               .now()
+                                               .plus(electorProperties.getRetryPeriod()));
+            }
+        }
+    }
+
+    // --- Lock lost handling & reacquire ---
+
+    private void scheduleRefreshTask() {
+        cancelRefreshTask();
+        final ScheduledFuture<?> future = taskScheduler.scheduleAtFixedRate(this::refreshLock,
+                                                                            Instant
+                                                                              .now()
+                                                                              .plus(electorProperties.getRenewDeadline()),
+                                                                            electorProperties.getRenewDeadline());
+        refreshFuture.set(future);
     }
 
     private void refreshLock() {
-        if (!running) {
+        if (!running.get()) {
             handleLockLost();
             return;
         }
         try {
-
             lockRegistry.renewLock(electorProperties.getLockName(), electorProperties.getLeaseDuration());
-            log.debug("Lock TTL extended by {} seconds", electorProperties.getLeaseDuration().get(ChronoUnit.SECONDS));
-
+            log.debug("Lock TTL extended by {} seconds",
+                      electorProperties
+                              .getLeaseDuration()
+                              .get(ChronoUnit.SECONDS));
         } catch (final Exception e) {
             log.error("Error while refreshing lock, treating as lock lost", e);
             handleLockLost();
         }
     }
 
-    // --- Lock lost handling & reacquire ---
-
     private void handleLockLost() {
         cancelRefreshTask();
-        releaseLockIfHeld(); // be defensive
+        releaseLockIfHeld();
 
         callbacks.onLockLost();
 
-        if (running) {
-            // Try to become leader again
+        if (running.get()) {
             log.info("Scheduling re-acquire of lock after loss");
-            scheduler.submit(this::lockLoop);
+            taskScheduler.schedule(this::lockLoop, Instant.now());
         }
     }
 
-    private void cancelRefreshTask() {
-        if (refreshFuture != null && !refreshFuture.isCancelled()) {
-            refreshFuture.cancel(true);
-        }
-        refreshFuture = null;
-    }
-
-    private void releaseLockIfHeld() {
-        try {
-            if (lock != null) {
-                log.info("Releasing lock '{}'", electorProperties.getLockName());
-                lock.unlock();
-            }
-        }  catch (final Exception e) {
-            log.error("Error while releasing lock", e);
-        }
-    }
-
-    // Optional: control startup/shutdown ordering if needed
     @Override
     public int getPhase() {
-        // Lower phase -> start earlier, stop later.
-        // Adjust if you have other components that depend on the lock.
         return Integer.MIN_VALUE;
     }
 }
