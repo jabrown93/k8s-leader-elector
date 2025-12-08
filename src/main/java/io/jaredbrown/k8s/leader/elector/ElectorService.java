@@ -1,5 +1,6 @@
 package io.jaredbrown.k8s.leader.elector;
 
+import jakarta.annotation.Nonnull;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,9 +21,13 @@ import java.util.concurrent.atomic.AtomicReference;
 @Service
 @RequiredArgsConstructor
 public class ElectorService implements SmartLifecycle {
+    @Nonnull
     private final LockCallbacks callbacks;
+    @Nonnull
     private final ElectorProperties electorProperties;
+    @Nonnull
     private final RedisLockRegistry lockRegistry;
+    @Nonnull
     private final TaskScheduler taskScheduler;
 
     private final AtomicReference<DistributedLock> lock = new AtomicReference<>();
@@ -104,7 +109,7 @@ public class ElectorService implements SmartLifecycle {
             Thread
                     .currentThread()
                     .interrupt();
-            log.warn("Lock acquisition interrupted, exiting lock loop");
+            log.warn("Lock acquisition interrupted, exiting lock loop", e);
         } catch (final Exception e) {
             log.error("Error while trying to acquire lock, retrying in {}", electorProperties.getRetryPeriod(), e);
             if (running.get()) {

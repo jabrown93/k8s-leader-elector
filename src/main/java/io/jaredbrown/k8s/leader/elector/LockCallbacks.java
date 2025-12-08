@@ -3,6 +3,7 @@ package io.jaredbrown.k8s.leader.elector;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
+import jakarta.annotation.Nonnull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,7 +16,9 @@ import java.util.Map;
 @Component
 @RequiredArgsConstructor
 public class LockCallbacks {
+    @Nonnull
     private final ElectorProperties electorProperties;
+    @Nonnull
     private final KubernetesClient kubernetesClient;
 
     @Value("${POD_NAME:unknown}")
