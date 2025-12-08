@@ -6,10 +6,10 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
-public class LeaderLabelerApp {
+public class Application {
 
-    static void main(final String[] args) {
-        SpringApplication.run(LeaderLabelerApp.class, args);
+    public static void main(final String[] args) {
+        SpringApplication.run(Application.class, args);
     }
 
 }
