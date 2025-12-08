@@ -126,8 +126,8 @@ On lock acquisition, the service ensures exactly one pod has the leader label:
 
 1. Queries all Pods with label `app={elector.appName}`
 2. Updates all pods atomically:
-   - Sets `{elector.labelKey}=true` on the current pod (new leader)
-   - Sets `{elector.labelKey}=false` on all other pods (former leaders)
+    - Sets `{elector.labelKey}=true` on the current pod (new leader)
+    - Sets `{elector.labelKey}=false` on all other pods (former leaders)
 
 This two-phase approach ensures only one pod has the leader label at any given time.
 Individual pod label update failures are logged but don't prevent updating other pods.

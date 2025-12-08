@@ -15,9 +15,19 @@ import java.time.Instant;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ElectorServiceTest {
@@ -47,10 +57,18 @@ class ElectorServiceTest {
         electorService = new ElectorService(callbacks, electorProperties, lockRegistry, taskScheduler);
 
         // Default property values (using lenient() for properties that may not be used in all tests)
-        lenient().when(electorProperties.getLockName()).thenReturn("test-lock");
-        lenient().when(electorProperties.getRetryPeriod()).thenReturn(Duration.ofSeconds(5));
-        lenient().when(electorProperties.getRenewDeadline()).thenReturn(Duration.ofSeconds(60));
-        lenient().when(electorProperties.getLeaseDuration()).thenReturn(Duration.ofSeconds(120));
+        lenient()
+                .when(electorProperties.getLockName())
+                .thenReturn("test-lock");
+        lenient()
+                .when(electorProperties.getRetryPeriod())
+                .thenReturn(Duration.ofSeconds(5));
+        lenient()
+                .when(electorProperties.getRenewDeadline())
+                .thenReturn(Duration.ofSeconds(60));
+        lenient()
+                .when(electorProperties.getLeaseDuration())
+                .thenReturn(Duration.ofSeconds(120));
     }
 
     @Test
@@ -81,8 +99,9 @@ class ElectorServiceTest {
         // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
-        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class)))
-            .thenReturn((ScheduledFuture) scheduledFuture);
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
 
         electorService.start();
 
@@ -91,7 +110,9 @@ class ElectorServiceTest {
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
         // When
-        runnableCaptor.getValue().run();
+        runnableCaptor
+                .getValue()
+                .run();
 
         // Then
         verify(lockRegistry).obtain("test-lock");
@@ -113,7 +134,9 @@ class ElectorServiceTest {
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
         // When
-        runnableCaptor.getValue().run();
+        runnableCaptor
+                .getValue()
+                .run();
 
         // Then
         verify(lockRegistry).obtain("test-lock");
@@ -136,7 +159,9 @@ class ElectorServiceTest {
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
         // When
-        runnableCaptor.getValue().run();
+        runnableCaptor
+                .getValue()
+                .run();
 
         // Then
         verify(callbacks, never()).onLockAcquired();
@@ -156,7 +181,9 @@ class ElectorServiceTest {
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
         // When
-        runnableCaptor.getValue().run();
+        runnableCaptor
+                .getValue()
+                .run();
 
         // Then
         verify(callbacks, never()).onLockAcquired();
@@ -170,22 +197,27 @@ class ElectorServiceTest {
         // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
-        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class)))
-            .thenReturn((ScheduledFuture) scheduledFuture);
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
 
         electorService.start();
 
         // Capture lockLoop and execute to acquire lock
-        ArgumentCaptor<Runnable> lockLoopCaptor = ArgumentCaptor.forClass(Runnable.class);
+        final ArgumentCaptor<Runnable> lockLoopCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(lockLoopCaptor.capture(), any(Instant.class));
-        lockLoopCaptor.getValue().run();
+        lockLoopCaptor
+                .getValue()
+                .run();
 
         // Capture refresh task
         final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
 
         // When
-        refreshCaptor.getValue().run();
+        refreshCaptor
+                .getValue()
+                .run();
 
         // Then
         verify(lockRegistry).renewLock("test-lock", Duration.ofSeconds(120));
@@ -197,24 +229,30 @@ class ElectorServiceTest {
         // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
-        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class)))
-            .thenReturn((ScheduledFuture) scheduledFuture);
-        doThrow(new RuntimeException("Renew failed")).when(lockRegistry)
-            .renewLock(anyString(), any(Duration.class));
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
+        doThrow(new RuntimeException("Renew failed"))
+                .when(lockRegistry)
+                .renewLock(anyString(), any(Duration.class));
 
         electorService.start();
 
         // Capture lockLoop and execute to acquire lock
-        ArgumentCaptor<Runnable> lockLoopCaptor = ArgumentCaptor.forClass(Runnable.class);
+        final ArgumentCaptor<Runnable> lockLoopCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(lockLoopCaptor.capture(), any(Instant.class));
-        lockLoopCaptor.getValue().run();
+        lockLoopCaptor
+                .getValue()
+                .run();
 
         // Capture refresh task
         final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
 
         // When
-        refreshCaptor.getValue().run();
+        refreshCaptor
+                .getValue()
+                .run();
 
         // Then
         verify(callbacks).onLockLost();
@@ -258,16 +296,21 @@ class ElectorServiceTest {
         // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
-        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class)))
-            .thenReturn((ScheduledFuture) scheduledFuture);
-        doThrow(new RuntimeException("Unlock failed")).when(lock).unlock();
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
+        doThrow(new RuntimeException("Unlock failed"))
+                .when(lock)
+                .unlock();
 
         electorService.start();
 
         // Capture and execute lockLoop
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
-        runnableCaptor.getValue().run();
+        runnableCaptor
+                .getValue()
+                .run();
 
         // When
         electorService.stop();

@@ -11,7 +11,9 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ElectorPropertiesTest {
 
@@ -75,8 +77,12 @@ class ElectorPropertiesTest {
 
         // Then
         assertFalse(violations.isEmpty());
-        assertTrue(violations.stream()
-            .anyMatch(v -> v.getPropertyPath().toString().equals("labelKey")));
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("labelKey")));
     }
 
     @Test
@@ -92,8 +98,12 @@ class ElectorPropertiesTest {
 
         // Then
         assertFalse(violations.isEmpty());
-        assertTrue(violations.stream()
-            .anyMatch(v -> v.getPropertyPath().toString().equals("labelKey")));
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("labelKey")));
     }
 
     @Test
@@ -109,8 +119,12 @@ class ElectorPropertiesTest {
 
         // Then
         assertFalse(violations.isEmpty());
-        assertTrue(violations.stream()
-            .anyMatch(v -> v.getPropertyPath().toString().equals("lockName")));
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("lockName")));
     }
 
     @Test
@@ -126,8 +140,12 @@ class ElectorPropertiesTest {
 
         // Then
         assertFalse(violations.isEmpty());
-        assertTrue(violations.stream()
-            .anyMatch(v -> v.getPropertyPath().toString().equals("lockName")));
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("lockName")));
     }
 
     @Test
@@ -143,8 +161,12 @@ class ElectorPropertiesTest {
 
         // Then
         assertFalse(violations.isEmpty());
-        assertTrue(violations.stream()
-            .anyMatch(v -> v.getPropertyPath().toString().equals("appName")));
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("appName")));
     }
 
     @Test
@@ -160,8 +182,12 @@ class ElectorPropertiesTest {
 
         // Then
         assertFalse(violations.isEmpty());
-        assertTrue(violations.stream()
-            .anyMatch(v -> v.getPropertyPath().toString().equals("appName")));
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("appName")));
     }
 
     @Test
@@ -178,8 +204,12 @@ class ElectorPropertiesTest {
 
         // Then
         assertFalse(violations.isEmpty());
-        assertTrue(violations.stream()
-            .anyMatch(v -> v.getPropertyPath().toString().equals("leaseDuration")));
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("leaseDuration")));
     }
 
     @Test
@@ -196,8 +226,12 @@ class ElectorPropertiesTest {
 
         // Then
         assertFalse(violations.isEmpty());
-        assertTrue(violations.stream()
-            .anyMatch(v -> v.getPropertyPath().toString().equals("renewDeadline")));
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("renewDeadline")));
     }
 
     @Test
@@ -214,8 +248,12 @@ class ElectorPropertiesTest {
 
         // Then
         assertFalse(violations.isEmpty());
-        assertTrue(violations.stream()
-            .anyMatch(v -> v.getPropertyPath().toString().equals("retryPeriod")));
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("retryPeriod")));
     }
 
     @Test

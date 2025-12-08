@@ -23,46 +23,51 @@ public class LockCallbacks {
 
     public void onLockAcquired() {
         log.info("Lock acquired - updating leader labels across deployment");
-        String namespace = kubernetesClient.getNamespace();
+        final String namespace = kubernetesClient.getNamespace();
 
         try {
             // Get all pods in the deployment
-            List<Pod> pods = kubernetesClient
-                .pods()
-                .inNamespace(namespace)
-                .withLabel("app", electorProperties.getAppName())
-                .list()
-                .getItems();
+            final List<Pod> pods = kubernetesClient
+                    .pods()
+                    .inNamespace(namespace)
+                    .withLabel("app", electorProperties.getAppName())
+                    .list()
+                    .getItems();
 
             // Update all pods: set leader=true on self, leader=false on others
-            for (Pod pod : pods) {
-                String podName = pod.getMetadata().getName();
-                boolean isLeader = podName.equals(selfPodName);
+            for (final Pod pod : pods) {
+                final String podName = pod
+                        .getMetadata()
+                        .getName();
+                final boolean isLeader = podName.equals(selfPodName);
                 updatePodLeaderLabel(namespace, podName, isLeader);
             }
 
             log.info("Successfully updated leader labels: {} is leader, {} other pods marked as non-leader",
-                selfPodName, pods.size() - 1);
-        } catch (KubernetesClientException e) {
-            String message = "Failed to update leader labels on lock acquisition";
+                     selfPodName,
+                     pods.size() - 1);
+        } catch (final KubernetesClientException e) {
+            final String message = "Failed to update leader labels on lock acquisition";
             log.error(message, e);
             throw new IllegalStateException(message, e);
         }
     }
 
-    private void updatePodLeaderLabel(String namespace, String podName, boolean isLeader) {
+    private void updatePodLeaderLabel(final String namespace, final String podName, final boolean isLeader) {
         try {
             kubernetesClient
-                .pods()
-                .inNamespace(namespace)
-                .withName(podName)
-                .edit(pod -> {
-                    Map<String, String> labels = pod.getMetadata().getLabels();
-                    labels.put(electorProperties.getLabelKey(), Boolean.toString(isLeader));
-                    return pod;
-                });
+                    .pods()
+                    .inNamespace(namespace)
+                    .withName(podName)
+                    .edit(pod -> {
+                        final Map<String, String> labels = pod
+                                .getMetadata()
+                                .getLabels();
+                        labels.put(electorProperties.getLabelKey(), Boolean.toString(isLeader));
+                        return pod;
+                    });
             log.debug("Set {}={} on pod {}", electorProperties.getLabelKey(), isLeader, podName);
-        } catch (KubernetesClientException e) {
+        } catch (final KubernetesClientException e) {
             log.warn("Failed to update leader label on pod {}: {}", podName, e.getMessage());
             // Don't throw - we want to continue updating other pods
         }
@@ -70,7 +75,7 @@ public class LockCallbacks {
 
     public void onLockLost() {
         log.warn("Lock lost - removing leader label from self");
-        String namespace = kubernetesClient.getNamespace();
+        final String namespace = kubernetesClient.getNamespace();
         updatePodLeaderLabel(namespace, selfPodName, false);
     }
 }

@@ -56,7 +56,7 @@ public class ElectorService implements SmartLifecycle {
     }
 
     private void cancelRefreshTask() {
-        ScheduledFuture<?> future = refreshFuture.getAndSet(null);
+        final ScheduledFuture<?> future = refreshFuture.getAndSet(null);
         if (future != null && !future.isCancelled()) {
             future.cancel(true);
         }
@@ -65,12 +65,12 @@ public class ElectorService implements SmartLifecycle {
     // --- Refresh logic: interval is configurable via electorProperties.getRenewDeadline() ---
 
     private void releaseLockIfHeld() {
-        DistributedLock currentLock = lock.getAndSet(null);
+        final DistributedLock currentLock = lock.getAndSet(null);
         if (currentLock != null) {
             try {
                 log.info("Releasing lock '{}'", electorProperties.getLockName());
                 currentLock.unlock();
-            } catch (Exception e) {
+            } catch (final Exception e) {
                 log.error("Error while releasing lock", e);
             }
         }
@@ -83,11 +83,10 @@ public class ElectorService implements SmartLifecycle {
 
         try {
             log.info("Attempting to acquire lock '{}'...", electorProperties.getLockName());
-            DistributedLock newLock = lockRegistry.obtain(electorProperties.getLockName());
-            boolean acquired = newLock.tryLock(
-                electorProperties.getRetryPeriod().getSeconds(),
-                TimeUnit.SECONDS
-            );
+            final DistributedLock newLock = lockRegistry.obtain(electorProperties.getLockName());
+            final boolean acquired = newLock.tryLock(electorProperties
+                                                       .getRetryPeriod()
+                                                       .getSeconds(), TimeUnit.SECONDS);
 
             if (acquired) {
                 lock.set(newLock);
@@ -96,15 +95,23 @@ public class ElectorService implements SmartLifecycle {
                 scheduleRefreshTask();
             } else {
                 log.info("Could not acquire lock, will retry in {}", electorProperties.getRetryPeriod());
-                taskScheduler.schedule(this::lockLoop, Instant.now().plus(electorProperties.getRetryPeriod()));
+                taskScheduler.schedule(this::lockLoop,
+                                       Instant
+                                               .now()
+                                               .plus(electorProperties.getRetryPeriod()));
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        } catch (final InterruptedException e) {
+            Thread
+                    .currentThread()
+                    .interrupt();
             log.warn("Lock acquisition interrupted, exiting lock loop");
-        } catch (Exception e) {
+        } catch (final Exception e) {
             log.error("Error while trying to acquire lock, retrying in {}", electorProperties.getRetryPeriod(), e);
             if (running.get()) {
-                taskScheduler.schedule(this::lockLoop, Instant.now().plus(electorProperties.getRetryPeriod()));
+                taskScheduler.schedule(this::lockLoop,
+                                       Instant
+                                               .now()
+                                               .plus(electorProperties.getRetryPeriod()));
             }
         }
     }
@@ -113,11 +120,11 @@ public class ElectorService implements SmartLifecycle {
 
     private void scheduleRefreshTask() {
         cancelRefreshTask();
-        ScheduledFuture<?> future = taskScheduler.scheduleAtFixedRate(
-            this::refreshLock,
-            Instant.now().plus(electorProperties.getRenewDeadline()),
-            electorProperties.getRenewDeadline()
-        );
+        final ScheduledFuture<?> future = taskScheduler.scheduleAtFixedRate(this::refreshLock,
+                                                                            Instant
+                                                                              .now()
+                                                                              .plus(electorProperties.getRenewDeadline()),
+                                                                            electorProperties.getRenewDeadline());
         refreshFuture.set(future);
     }
 
@@ -129,8 +136,10 @@ public class ElectorService implements SmartLifecycle {
         try {
             lockRegistry.renewLock(electorProperties.getLockName(), electorProperties.getLeaseDuration());
             log.debug("Lock TTL extended by {} seconds",
-                electorProperties.getLeaseDuration().get(ChronoUnit.SECONDS));
-        } catch (Exception e) {
+                      electorProperties
+                              .getLeaseDuration()
+                              .get(ChronoUnit.SECONDS));
+        } catch (final Exception e) {
             log.error("Error while refreshing lock, treating as lock lost", e);
             handleLockLost();
         }
