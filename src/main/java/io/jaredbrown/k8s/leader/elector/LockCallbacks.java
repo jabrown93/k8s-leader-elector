@@ -1,11 +1,11 @@
 package io.jaredbrown.k8s.leader.elector;
 
+import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.KubernetesClientException;
 
 import java.util.Map;
 
@@ -19,29 +19,31 @@ public class LockCallbacks {
     @Value("${POD_NAME:unknown}")
     private String selfPodName;
 
-    private void updateSelfLeaderLabel(boolean isLeader) {
-        String namespace = kubernetesClient.getNamespace();
-        try {
-            kubernetesClient
-                .pods()
-                .inNamespace(namespace)
-                .withName(selfPodName)
-                .edit(pod -> {
-                    Map<String, String> labels = pod.getMetadata().getLabels();
-                    labels.put(electorProperties.getLabelKey(), Boolean.toString(isLeader));
-                    return pod;
-                });
-            log.info("Set {}={} on pod {}", electorProperties.getLabelKey(), isLeader, selfPodName);
-        } catch (KubernetesClientException e) {
-            String message = String.format("Failed to update leader label on pod %s", selfPodName);
-            log.error(message, e);
-            throw new IllegalStateException(message, e);
-        }
-    }
-
     public void onLockAcquired() {
         log.info("Lock acquired - marking self as leader");
         updateSelfLeaderLabel(true);
+    }
+
+    private void updateSelfLeaderLabel(final boolean isLeader) {
+        final String namespace = kubernetesClient.getNamespace();
+        try {
+            kubernetesClient
+                    .pods()
+                    .inNamespace(namespace)
+                    .withName(selfPodName)
+                    .edit(pod -> {
+                        final Map<String, String> labels = pod
+                                .getMetadata()
+                                .getLabels();
+                        labels.put(electorProperties.getLabelKey(), Boolean.toString(isLeader));
+                        return pod;
+                    });
+            log.info("Set {}={} on pod {}", electorProperties.getLabelKey(), isLeader, selfPodName);
+        } catch (final KubernetesClientException e) {
+            final String message = String.format("Failed to update leader label on pod %s", selfPodName);
+            log.error(message, e);
+            throw new IllegalStateException(message, e);
+        }
     }
 
     public void onLockLost() {

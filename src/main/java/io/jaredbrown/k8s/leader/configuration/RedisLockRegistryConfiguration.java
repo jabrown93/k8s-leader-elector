@@ -9,12 +9,10 @@ import org.springframework.integration.redis.util.RedisLockRegistry;
 @Configuration
 public class RedisLockRegistryConfiguration {
     @Bean
-    public RedisLockRegistry redisLockRegistry(RedisConnectionFactory redisConnectionFactory,
-                                               ElectorProperties electorProperties) {
-        return new RedisLockRegistry(
-            redisConnectionFactory,
-            electorProperties.getLockName() + "-lock-registry",
-            electorProperties.getLeaseDuration()
-        );
+    public RedisLockRegistry redisLockRegistry(final RedisConnectionFactory redisConnectionFactory,
+                                               final ElectorProperties electorProperties) {
+        return new RedisLockRegistry(redisConnectionFactory,
+                                     electorProperties.getLockName() + "-lock-registry",
+                                     electorProperties.getLeaseDuration());
     }
 }

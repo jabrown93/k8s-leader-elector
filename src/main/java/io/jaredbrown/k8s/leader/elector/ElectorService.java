@@ -7,14 +7,14 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.integration.redis.util.RedisLockRegistry;
 import org.springframework.integration.support.locks.DistributedLock;
 import org.springframework.scheduling.TaskScheduler;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Service
@@ -25,13 +25,13 @@ public class ElectorService implements SmartLifecycle {
     private final RedisLockRegistry lockRegistry;
     private final TaskScheduler taskScheduler;
 
-    private volatile DistributedLock lock;
-    private volatile boolean running = false;
-    private volatile ScheduledFuture<?> refreshFuture;
+    private final AtomicReference<DistributedLock> lock = new AtomicReference<>();
+    private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicReference<ScheduledFuture<?>> refreshFuture = new AtomicReference<>();
 
     @Override
     public void start() {
-        running = true;
+        running.set(true);
         log.info("Starting ElectorService");
         taskScheduler.schedule(this::lockLoop, Instant.now());
     }
@@ -39,14 +39,14 @@ public class ElectorService implements SmartLifecycle {
     @Override
     public void stop() {
         log.info("Stopping ElectorService");
-        running = false;
+        running.set(false);
         cancelRefreshTask();
         releaseLockIfHeld();
     }
 
     @Override
     public boolean isRunning() {
-        return running;
+        return running.get();
     }
 
     @PreDestroy
@@ -55,18 +55,42 @@ public class ElectorService implements SmartLifecycle {
         stop();
     }
 
+    private void cancelRefreshTask() {
+        ScheduledFuture<?> future = refreshFuture.getAndSet(null);
+        if (future != null && !future.isCancelled()) {
+            future.cancel(true);
+        }
+    }
+
+    // --- Refresh logic: interval is configurable via electorProperties.getRenewDeadline() ---
+
+    private void releaseLockIfHeld() {
+        DistributedLock currentLock = lock.getAndSet(null);
+        if (currentLock != null) {
+            try {
+                log.info("Releasing lock '{}'", electorProperties.getLockName());
+                currentLock.unlock();
+            } catch (Exception e) {
+                log.error("Error while releasing lock", e);
+            }
+        }
+    }
 
     private void lockLoop() {
-        if (!running) {
+        if (!running.get()) {
             return;
         }
 
         try {
             log.info("Attempting to acquire lock '{}'...", electorProperties.getLockName());
-            lock = lockRegistry.obtain(electorProperties.getLockName());
-            boolean acquired = lock.tryLock(electorProperties.getRetryPeriod().getSeconds(), TimeUnit.SECONDS);
+            DistributedLock newLock = lockRegistry.obtain(electorProperties.getLockName());
+            boolean acquired = newLock.tryLock(
+                electorProperties.getRetryPeriod().getSeconds(),
+                TimeUnit.SECONDS
+            );
 
             if (acquired) {
+                lock.set(newLock);
                 log.info("Lock '{}' acquired", electorProperties.getLockName());
                 callbacks.onLockAcquired();
                 scheduleRefreshTask();
@@ -79,38 +103,38 @@ public class ElectorService implements SmartLifecycle {
             log.warn("Lock acquisition interrupted, exiting lock loop");
         } catch (Exception e) {
             log.error("Error while trying to acquire lock, retrying in {}", electorProperties.getRetryPeriod(), e);
-            if (running) {
+            if (running.get()) {
                 taskScheduler.schedule(this::lockLoop, Instant.now().plus(electorProperties.getRetryPeriod()));
             }
         }
     }
 
-    // --- Refresh logic: interval is configurable via electorProperties.getRenewDeadline() ---
+    // --- Lock lost handling & reacquire ---
 
     private void scheduleRefreshTask() {
         cancelRefreshTask();
-        refreshFuture = taskScheduler.scheduleAtFixedRate(
+        ScheduledFuture<?> future = taskScheduler.scheduleAtFixedRate(
             this::refreshLock,
             Instant.now().plus(electorProperties.getRenewDeadline()),
             electorProperties.getRenewDeadline()
         );
+        refreshFuture.set(future);
     }
 
     private void refreshLock() {
-        if (!running) {
+        if (!running.get()) {
             handleLockLost();
             return;
         }
         try {
             lockRegistry.renewLock(electorProperties.getLockName(), electorProperties.getLeaseDuration());
-            log.debug("Lock TTL extended by {} seconds", electorProperties.getLeaseDuration().get(ChronoUnit.SECONDS));
+            log.debug("Lock TTL extended by {} seconds",
+                electorProperties.getLeaseDuration().get(ChronoUnit.SECONDS));
         } catch (Exception e) {
             log.error("Error while refreshing lock, treating as lock lost", e);
             handleLockLost();
         }
     }
-
-    // --- Lock lost handling & reacquire ---
 
     private void handleLockLost() {
         cancelRefreshTask();
@@ -118,30 +142,9 @@ public class ElectorService implements SmartLifecycle {
 
         callbacks.onLockLost();
 
-        if (running) {
+        if (running.get()) {
             log.info("Scheduling re-acquire of lock after loss");
             taskScheduler.schedule(this::lockLoop, Instant.now());
-        }
-    }
-
-    private void cancelRefreshTask() {
-        if (refreshFuture != null && !refreshFuture.isCancelled()) {
-            refreshFuture.cancel(true);
-        }
-        refreshFuture = null;
-    }
-
-    private void releaseLockIfHeld() {
-        DistributedLock currentLock = lock;
-        if (currentLock != null) {
-            try {
-                log.info("Releasing lock '{}'", electorProperties.getLockName());
-                currentLock.unlock();
-            } catch (Exception e) {
-                log.error("Error while releasing lock", e);
-            } finally {
-                lock = null;
-            }
         }
     }
 

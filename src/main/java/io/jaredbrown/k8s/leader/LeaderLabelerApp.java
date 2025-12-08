@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 @ConfigurationPropertiesScan
 public class LeaderLabelerApp {
 
-    public static void main(String[] args) {
+    public static void main(final String[] args) {
         SpringApplication.run(LeaderLabelerApp.class, args);
     }
 
