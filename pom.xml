@@ -21,8 +21,6 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <lombok.version>1.18.42</lombok.version>
         <maven-compiler-plugin.version>3.14.1</maven-compiler-plugin.version>
-        <maven-jar-plugin.version>3.5.0</maven-jar-plugin.version>
-        <maven-dependency-plugin.version>3.9.0</maven-dependency-plugin.version>
         <spring-cloud-dependencies.version>2025.1.0</spring-cloud-dependencies.version>
         <log4j-bom.version>2.25.2</log4j-bom.version>
     </properties>

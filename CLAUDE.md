@@ -35,7 +35,16 @@ make docker-release
 
 # Manual build
 make build
+
+# Local test build
+docker build -t k8s-leader-elector:test .
 ```
+
+**Container Configuration:**
+- Uses `tini` as init system for proper signal handling and zombie process reaping
+- JVM configured with `-XX:+UseContainerSupport` to detect container memory/CPU limits
+- Heap sized dynamically: 50-75% of container memory allocation
+- OOM behavior: exits cleanly and creates heap dump at `/tmp/heapdump.hprof`
 
 ### Running Locally
 
