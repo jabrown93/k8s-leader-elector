@@ -22,7 +22,7 @@
         <lombok.version>1.18.42</lombok.version>
         <maven-compiler-plugin.version>3.14.1</maven-compiler-plugin.version>
         <spring-cloud-dependencies.version>2025.1.0</spring-cloud-dependencies.version>
-        <log4j-bom.version>2.25.2</log4j-bom.version>
+        <log4j-bom.version>2.25.3</log4j-bom.version>
     </properties>
 
     <dependencies>
