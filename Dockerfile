@@ -1,4 +1,7 @@
-FROM amazoncorretto:25.0.0-alpine3.22
+#syntax=docker/dockerfile:1
+
+# === Build stage: Install tini and prepare application ===
+FROM dhi.io/amazoncorretto:25.0.0-alpine3.22-dev AS builder
 
 # Install tini for proper signal handling and process management
 RUN apk add --no-cache tini
@@ -6,6 +9,15 @@ RUN apk add --no-cache tini
 COPY target/leader-elector-*.jar /app/leader-elector.jar
 
 WORKDIR /app
+
+# === Final stage: Create minimal runtime image ===
+FROM dhi.io/amazoncorretto:25.0.0-alpine3.22
+
+WORKDIR /app
+
+# Copy tini and application from the builder stage
+COPY --from=builder /sbin/tini /sbin/tini
+COPY --from=builder /app/leader-elector.jar /app/leader-elector.jar
 
 # Use tini as init system to handle signals and reap zombie processes
 ENTRYPOINT ["/sbin/tini", "--"]
