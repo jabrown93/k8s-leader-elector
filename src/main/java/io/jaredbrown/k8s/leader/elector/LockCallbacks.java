@@ -33,7 +33,7 @@ public class LockCallbacks {
             final List<Pod> pods = kubernetesClient
                     .pods()
                     .inNamespace(namespace)
-                    .withLabel("app", electorProperties.getAppName())
+                    .withLabel(electorProperties.getSelectorLabelKey(), electorProperties.getSelectorLabelValue())
                     .list()
                     .getItems();
 

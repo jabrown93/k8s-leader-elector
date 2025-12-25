@@ -50,7 +50,8 @@ class ElectorPropertiesTest {
         // When
         properties.setLabelKey("my-label");
         properties.setLockName("my-lock");
-        properties.setAppName("my-app");
+        properties.setSelectorLabelKey("app");
+        properties.setSelectorLabelValue("my-app");
         properties.setLeaseDuration(Duration.ofSeconds(180));
         properties.setRenewDeadline(Duration.ofSeconds(90));
         properties.setRetryPeriod(Duration.ofSeconds(10));
@@ -58,7 +59,8 @@ class ElectorPropertiesTest {
         // Then
         assertEquals("my-label", properties.getLabelKey());
         assertEquals("my-lock", properties.getLockName());
-        assertEquals("my-app", properties.getAppName());
+        assertEquals("app", properties.getSelectorLabelKey());
+        assertEquals("my-app", properties.getSelectorLabelValue());
         assertEquals(Duration.ofSeconds(180), properties.getLeaseDuration());
         assertEquals(Duration.ofSeconds(90), properties.getRenewDeadline());
         assertEquals(Duration.ofSeconds(10), properties.getRetryPeriod());
@@ -70,7 +72,7 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey(null);
         properties.setLockName("test-lock");
-        properties.setAppName("test-app");
+        properties.setSelectorLabelValue("test-app");
 
         // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
@@ -91,7 +93,7 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("  ");
         properties.setLockName("test-lock");
-        properties.setAppName("test-app");
+        properties.setSelectorLabelValue("test-app");
 
         // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
@@ -112,7 +114,7 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName(null);
-        properties.setAppName("test-app");
+        properties.setSelectorLabelValue("test-app");
 
         // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
@@ -133,7 +135,7 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("");
-        properties.setAppName("test-app");
+        properties.setSelectorLabelValue("test-app");
 
         // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
@@ -154,7 +156,7 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
-        properties.setAppName(null);
+        properties.setSelectorLabelValue(null);
 
         // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
@@ -166,7 +168,7 @@ class ElectorPropertiesTest {
                            .anyMatch(v -> v
                                    .getPropertyPath()
                                    .toString()
-                                   .equals("appName")));
+                                   .equals("selectorLabelValue")));
     }
 
     @Test
@@ -175,7 +177,7 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
-        properties.setAppName("   ");
+        properties.setSelectorLabelValue("   ");
 
         // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
@@ -187,7 +189,7 @@ class ElectorPropertiesTest {
                            .anyMatch(v -> v
                                    .getPropertyPath()
                                    .toString()
-                                   .equals("appName")));
+                                   .equals("selectorLabelValue")));
     }
 
     @Test
@@ -196,7 +198,7 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
-        properties.setAppName("test-app");
+        properties.setSelectorLabelValue("test-app");
         properties.setLeaseDuration(null);
 
         // When
@@ -218,7 +220,7 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
-        properties.setAppName("test-app");
+        properties.setSelectorLabelValue("test-app");
         properties.setRenewDeadline(null);
 
         // When
@@ -240,7 +242,7 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
-        properties.setAppName("test-app");
+        properties.setSelectorLabelValue("test-app");
         properties.setRetryPeriod(null);
 
         // When
@@ -262,7 +264,8 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
-        properties.setAppName("test-app");
+        properties.setSelectorLabelKey("app");
+        properties.setSelectorLabelValue("test-app");
 
         // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);

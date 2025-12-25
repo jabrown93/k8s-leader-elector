@@ -18,8 +18,11 @@ public class ElectorProperties {
     @NotBlank(message = "elector.lockName must be configured")
     private String lockName;
 
-    @NotBlank(message = "elector.appName must be configured")
-    private String appName;
+    @NotBlank(message = "elector.selectorName must be configured")
+    private String selectorLabelKey;
+
+    @NotBlank(message = "elector.selectorValue must be configured")
+    private String selectorLabelValue;
 
     @NotNull
     private Duration leaseDuration = Duration.ofSeconds(120);

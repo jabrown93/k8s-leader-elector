@@ -54,8 +54,11 @@ class LockCallbacksTest {
                 .when(electorProperties.getLabelKey())
                 .thenReturn(LABEL_KEY);
         lenient()
-                .when(electorProperties.getAppName())
+                .when(electorProperties.getSelectorLabelValue())
                 .thenReturn(APP_NAME);
+        lenient()
+                .when(electorProperties.getSelectorLabelKey())
+                .thenReturn("app");
         lenient()
                 .when(kubernetesClient.getNamespace())
                 .thenReturn(NAMESPACE);
