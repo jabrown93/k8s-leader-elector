@@ -40,7 +40,6 @@ public class LockCallbacks {
                     .getItems();
 
             int nonLeaderUpdateFailures = 0;
-            boolean leaderUpdated = false;
 
             // Update all pods: set leader=true on self, leader=false on others
             for (final Pod pod : pods) {
@@ -48,19 +47,18 @@ public class LockCallbacks {
                         .getMetadata()
                         .getName();
                 final boolean isLeader = podName.equals(selfPodName);
-                final boolean updated = updatePodLeaderLabel(namespace, podName, isLeader);
 
                 if (isLeader) {
-                    leaderUpdated = updated;
-                } else if (!updated) {
+                    try {
+                        patchPodLeaderLabel(namespace, podName, true);
+                    } catch (final KubernetesClientException e) {
+                        final String message = "Failed to update leader label on elected pod " + selfPodName;
+                        log.error(message, e);
+                        throw new IllegalStateException(message, e);
+                    }
+                } else if (!updateNonLeaderPodLabel(namespace, podName)) {
                     nonLeaderUpdateFailures++;
                 }
-            }
-
-            if (!leaderUpdated) {
-                final String message = "Failed to update leader label on elected pod " + selfPodName;
-                log.error(message);
-                throw new IllegalStateException(message);
             }
 
             final int nonLeaderPods = pods.size() - 1;
@@ -81,23 +79,27 @@ public class LockCallbacks {
         }
     }
 
-    private boolean updatePodLeaderLabel(final String namespace, final String podName, final boolean isLeader) {
-        try {
-            final Pod patch = new PodBuilder()
-                    .withNewMetadata()
-                    .addToLabels(electorProperties.getLabelKey(), Boolean.toString(isLeader))
-                    .endMetadata()
-                    .build();
+    private void patchPodLeaderLabel(final String namespace, final String podName, final boolean isLeader) {
+        final Pod patch = new PodBuilder()
+                .withNewMetadata()
+                .addToLabels(electorProperties.getLabelKey(), Boolean.toString(isLeader))
+                .endMetadata()
+                .build();
 
-            kubernetesClient
-                    .pods()
-                    .inNamespace(namespace)
-                    .withName(podName)
-                    .patch(PatchContext.of(PatchType.JSON_MERGE), patch);
-            log.debug("Set {}={} on pod {}", electorProperties.getLabelKey(), isLeader, podName);
+        kubernetesClient
+                .pods()
+                .inNamespace(namespace)
+                .withName(podName)
+                .patch(PatchContext.of(PatchType.JSON_MERGE), patch);
+        log.debug("Set {}={} on pod {}", electorProperties.getLabelKey(), isLeader, podName);
+    }
+
+    private boolean updateNonLeaderPodLabel(final String namespace, final String podName) {
+        try {
+            patchPodLeaderLabel(namespace, podName, false);
             return true;
         } catch (final KubernetesClientException e) {
-            log.warn("Failed to update leader label on pod {}: {}", podName, e.getMessage());
+            log.warn("Failed to update leader label on pod {}", podName, e);
             return false;
         }
     }
@@ -105,6 +107,6 @@ public class LockCallbacks {
     public void onLockLost() {
         log.warn("Lock lost - removing leader label from self");
         final String namespace = kubernetesClient.getNamespace();
-        updatePodLeaderLabel(namespace, selfPodName, false);
+        updateNonLeaderPodLabel(namespace, selfPodName);
     }
 }

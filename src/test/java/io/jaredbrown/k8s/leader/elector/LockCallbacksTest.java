@@ -22,6 +22,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.any;
@@ -108,6 +109,7 @@ class LockCallbacksTest {
                 .getMetadata()
                 .getLabels()
                 .get(LABEL_KEY));
+        assertNull(leaderPatchCaptor.getValue().getSpec());
 
         final ArgumentCaptor<Pod> followerPatchCaptor = ArgumentCaptor.forClass(Pod.class);
         verify(followerPodResource).patch(patchContextCaptor.capture(), followerPatchCaptor.capture());
@@ -165,6 +167,7 @@ class LockCallbacksTest {
         assertTrue(exception
                            .getMessage()
                            .contains("Failed to update leader label on elected pod"));
+        assertInstanceOf(KubernetesClientException.class, exception.getCause());
     }
 
     private static Pod pod(final String name) {
