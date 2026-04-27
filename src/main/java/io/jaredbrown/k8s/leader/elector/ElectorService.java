@@ -96,14 +96,20 @@ public class ElectorService implements SmartLifecycle {
             if (acquired) {
                 lock.set(newLock);
                 log.info("Lock '{}' acquired", electorProperties.getLockName());
-                callbacks.onLockAcquired();
+                try {
+                    callbacks.onLockAcquired();
+                } catch (final Exception e) {
+                    log.error("Lock acquired, but post-acquire callback failed; releasing lock and retrying in {}",
+                              electorProperties.getRetryPeriod(),
+                              e);
+                    releaseLockIfHeld();
+                    scheduleRetry();
+                    return;
+                }
                 scheduleRefreshTask();
             } else {
                 log.info("Could not acquire lock, will retry in {}", electorProperties.getRetryPeriod());
-                taskScheduler.schedule(this::lockLoop,
-                                       Instant
-                                               .now()
-                                               .plus(electorProperties.getRetryPeriod()));
+                scheduleRetry();
             }
         } catch (final InterruptedException e) {
             Thread
@@ -113,11 +119,17 @@ public class ElectorService implements SmartLifecycle {
         } catch (final Exception e) {
             log.error("Error while trying to acquire lock, retrying in {}", electorProperties.getRetryPeriod(), e);
             if (running.get()) {
-                taskScheduler.schedule(this::lockLoop,
-                                       Instant
-                                               .now()
-                                               .plus(electorProperties.getRetryPeriod()));
+                scheduleRetry();
             }
+        }
+    }
+
+    private void scheduleRetry() {
+        if (running.get()) {
+            taskScheduler.schedule(this::lockLoop,
+                                   Instant
+                                           .now()
+                                           .plus(electorProperties.getRetryPeriod()));
         }
     }
 

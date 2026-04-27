@@ -1,15 +1,19 @@
 package io.jaredbrown.k8s.leader.elector;
 
 import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.FilterWatchListDeletable;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.PodResource;
+import io.fabric8.kubernetes.client.dsl.base.PatchContext;
+import io.fabric8.kubernetes.client.dsl.base.PatchType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -17,8 +21,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -71,11 +78,18 @@ class LockCallbacksTest {
     }
 
     @Test
-    void onLockAcquired_shouldQueryPodsWithCorrectLabel() {
+    void onLockAcquired_shouldPatchPodsWithJsonMergePatch() {
         // Given
+        final PodResource leaderPodResource = mock(PodResource.class);
+        final PodResource followerPodResource = mock(PodResource.class);
+        final Pod leaderPod = pod(SELF_POD_NAME);
+        final Pod followerPod = pod("pod-2");
+
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
         when(labeledPods.list()).thenReturn(podList);
-        when(podList.getItems()).thenReturn(List.of());
+        when(podList.getItems()).thenReturn(List.of(leaderPod, followerPod));
+        when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(leaderPodResource);
+        when(namespacedPods.withName("pod-2")).thenReturn(followerPodResource);
 
         // When
         lockCallbacks.onLockAcquired();
@@ -83,6 +97,27 @@ class LockCallbacksTest {
         // Then
         verify(namespacedPods).withLabel("app", APP_NAME);
         verify(labeledPods).list();
+
+        final ArgumentCaptor<PatchContext> patchContextCaptor = ArgumentCaptor.forClass(PatchContext.class);
+        final ArgumentCaptor<Pod> leaderPatchCaptor = ArgumentCaptor.forClass(Pod.class);
+        verify(leaderPodResource).patch(patchContextCaptor.capture(), leaderPatchCaptor.capture());
+        assertEquals(PatchType.JSON_MERGE, patchContextCaptor
+                .getValue()
+                .getPatchType());
+        assertEquals("true", leaderPatchCaptor
+                .getValue()
+                .getMetadata()
+                .getLabels()
+                .get(LABEL_KEY));
+        assertNull(leaderPatchCaptor.getValue().getSpec());
+
+        final ArgumentCaptor<Pod> followerPatchCaptor = ArgumentCaptor.forClass(Pod.class);
+        verify(followerPodResource).patch(patchContextCaptor.capture(), followerPatchCaptor.capture());
+        assertEquals("false", followerPatchCaptor
+                .getValue()
+                .getMetadata()
+                .getLabels()
+                .get(LABEL_KEY));
     }
 
     @Test
@@ -112,5 +147,35 @@ class LockCallbacksTest {
 
         verify(kubernetesClient).getNamespace();
         verify(kubernetesClient).pods();
+    }
+
+    @Test
+    void onLockAcquired_shouldThrowWhenLeaderPodLabelUpdateFails() {
+        // Given
+        final PodResource leaderPodResource = mock(PodResource.class);
+        when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
+        when(labeledPods.list()).thenReturn(podList);
+        when(podList.getItems()).thenReturn(List.of(pod(SELF_POD_NAME)));
+        when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(leaderPodResource);
+        when(leaderPodResource.patch(any(PatchContext.class), any(Pod.class)))
+                .thenThrow(new KubernetesClientException("immutable spec update"));
+
+        // When/Then
+        final IllegalStateException exception = assertThrows(IllegalStateException.class,
+                                                             () -> lockCallbacks.onLockAcquired());
+
+        assertTrue(exception
+                           .getMessage()
+                           .contains("Failed to update leader label on elected pod"));
+        assertInstanceOf(KubernetesClientException.class, exception.getCause());
+        assertInstanceOf(KubernetesClientException.class, exception.getCause());
+    }
+
+    private static Pod pod(final String name) {
+        return new PodBuilder()
+                .withNewMetadata()
+                .withName(name)
+                .endMetadata()
+                .build();
     }
 }

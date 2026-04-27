@@ -122,6 +122,32 @@ class ElectorServiceTest {
     }
 
     @Test
+    void lockLoop_shouldReleaseLockAndRetryWhenLockAcquiredCallbackFails() throws Exception {
+        // Given
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
+        doThrow(new IllegalStateException("failed to label elected pod"))
+                .when(callbacks)
+                .onLockAcquired();
+
+        electorService.start();
+
+        final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
+
+        // When
+        runnableCaptor
+                .getValue()
+                .run();
+
+        // Then
+        verify(callbacks).onLockAcquired();
+        verify(lock).unlock();
+        verify(taskScheduler, never()).scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class));
+        verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(Instant.class));
+    }
+
+    @Test
     void lockLoop_shouldRetryWhenLockNotAcquired() throws Exception {
         // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
