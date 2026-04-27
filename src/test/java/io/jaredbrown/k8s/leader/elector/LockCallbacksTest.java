@@ -168,6 +168,7 @@ class LockCallbacksTest {
                            .getMessage()
                            .contains("Failed to update leader label on elected pod"));
         assertInstanceOf(KubernetesClientException.class, exception.getCause());
+        assertInstanceOf(KubernetesClientException.class, exception.getCause());
     }
 
     private static Pod pod(final String name) {
