@@ -50,11 +50,20 @@ class ElectorServiceTest {
     @Mock
     private ScheduledFuture<?> scheduledFuture;
 
+    @Mock
+    private HealthProbe healthProbe;
+
     private ElectorService electorService;
 
     @BeforeEach
     void setUp() {
-        electorService = new ElectorService(callbacks, electorProperties, lockRegistry, taskScheduler);
+        electorService = new ElectorService(callbacks, electorProperties, lockRegistry, taskScheduler, healthProbe);
+
+        // Default to healthy so the existing (probe-agnostic) tests behave exactly as before; the
+        // health-gate tests below override this per case.
+        lenient()
+                .when(healthProbe.isHealthy())
+                .thenReturn(true);
 
         // Default property values (using lenient() for properties that may not be used in all tests)
         lenient()
@@ -296,6 +305,123 @@ class ElectorServiceTest {
 
         // Then
         assertFalse(electorService.isRunning());
+    }
+
+    @Test
+    void lockLoop_shouldNotLeadWhenUnhealthyWithinDeadlockGrace() throws Exception {
+        // Given: lock is free but this pod fails its health probe, and the grace has not elapsed
+        when(healthProbe.isHealthy()).thenReturn(false);
+        lenient()
+                .when(electorProperties.getHealthProbeDeadlockGrace())
+                .thenReturn(Duration.ofMinutes(5));
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
+
+        electorService.start();
+        final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
+
+        // When
+        runnableCaptor
+                .getValue()
+                .run();
+
+        // Then: it does not lead, releases the transiently-held lock, and retries
+        verify(callbacks, never()).onLockAcquired();
+        verify(lock).unlock();
+        verify(taskScheduler, never()).scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class));
+        verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(Instant.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void lockLoop_shouldBreakDeadlockAndLeadWhenUnhealthyBeyondGrace() throws Exception {
+        // Given: unhealthy, but the deadlock grace is zero so the escape hatch fires immediately
+        when(healthProbe.isHealthy()).thenReturn(false);
+        when(electorProperties.getHealthProbeDeadlockGrace()).thenReturn(Duration.ZERO);
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
+
+        electorService.start();
+        final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
+
+        // When
+        runnableCaptor
+                .getValue()
+                .run();
+
+        // Then: it leads (degraded) rather than deadlocking forever
+        verify(callbacks).onLockAcquired();
+        verify(taskScheduler).scheduleAtFixedRate(any(Runnable.class), any(Instant.class), eq(Duration.ofSeconds(60)));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void refreshLock_shouldRelinquishAfterConsecutiveUnhealthyProbes() throws Exception {
+        // Given: healthy at acquisition, then unhealthy at the next refresh with threshold 1
+        when(healthProbe.isHealthy()).thenReturn(true, false);
+        when(electorProperties.getHealthProbeFailureThreshold()).thenReturn(1);
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
+
+        electorService.start();
+        final ArgumentCaptor<Runnable> lockLoopCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(lockLoopCaptor.capture(), any(Instant.class));
+        lockLoopCaptor
+                .getValue()
+                .run();
+
+        final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
+
+        // When
+        refreshCaptor
+                .getValue()
+                .run();
+
+        // Then: it relinquishes leadership instead of renewing
+        verify(lockRegistry, never()).renewLock(anyString(), any(Duration.class));
+        verify(callbacks).onLockLost();
+        verify(lock).unlock();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void refreshLock_shouldTolerateTransientUnhealthyBelowThreshold() throws Exception {
+        // Given: healthy at acquisition, one unhealthy refresh, threshold 3
+        when(healthProbe.isHealthy()).thenReturn(true, false);
+        when(electorProperties.getHealthProbeFailureThreshold()).thenReturn(3);
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
+
+        electorService.start();
+        final ArgumentCaptor<Runnable> lockLoopCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(lockLoopCaptor.capture(), any(Instant.class));
+        lockLoopCaptor
+                .getValue()
+                .run();
+
+        final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
+
+        // When
+        refreshCaptor
+                .getValue()
+                .run();
+
+        // Then: a single failure below the threshold keeps the lock (renews, does not relinquish)
+        verify(lockRegistry).renewLock("test-lock", Duration.ofSeconds(120));
+        verify(callbacks, never()).onLockLost();
     }
 
     @Test

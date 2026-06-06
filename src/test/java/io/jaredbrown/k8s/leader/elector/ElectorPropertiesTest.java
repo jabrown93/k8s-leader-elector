@@ -13,6 +13,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ElectorPropertiesTest {
@@ -40,6 +41,20 @@ class ElectorPropertiesTest {
         assertEquals(Duration.ofSeconds(120), properties.getLeaseDuration());
         assertEquals(Duration.ofSeconds(60), properties.getRenewDeadline());
         assertEquals(Duration.ofSeconds(5), properties.getRetryPeriod());
+    }
+
+    @Test
+    void shouldHaveHealthProbeDisabledByDefault() {
+        // When
+        final ElectorProperties properties = new ElectorProperties();
+
+        // Then — disabled with safe defaults so probe-less consumers are unaffected
+        assertFalse(properties.isHealthProbeEnabled());
+        assertNull(properties.getHealthProbeFilePath());
+        assertEquals("healthy", properties.getHealthProbeHealthyContent());
+        assertEquals(Duration.ofMinutes(2), properties.getHealthProbeMaxAge());
+        assertEquals(3, properties.getHealthProbeFailureThreshold());
+        assertEquals(Duration.ofMinutes(5), properties.getHealthProbeDeadlockGrace());
     }
 
     @Test
