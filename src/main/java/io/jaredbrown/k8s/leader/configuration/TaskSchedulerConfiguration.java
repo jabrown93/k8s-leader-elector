@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
+import java.time.Clock;
+
 @Configuration
 public class TaskSchedulerConfiguration {
     @Nonnull
@@ -17,5 +19,13 @@ public class TaskSchedulerConfiguration {
         scheduler.setDaemon(true);
         scheduler.initialize();
         return scheduler;
+    }
+
+    // System clock for time-based logic (e.g. the deadlock-grace window). Injected so tests can
+    // supply a controllable clock.
+    @Nonnull
+    @Bean
+    public Clock clock() {
+        return Clock.systemUTC();
     }
 }

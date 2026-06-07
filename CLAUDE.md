@@ -65,6 +65,18 @@ The application requires:
 - Lock acquisition loop with configurable retry period
 - Automatic lock renewal via scheduled executor at `renewDeadline` interval
 - Handles lock loss and attempts reacquisition automatically
+- Optional health gating (when `healthProbeEnabled`): an unhealthy pod won't acquire the lock
+  (eligibility gate in `lockLoop`), and a leader that goes unhealthy relinquishes after
+  `healthProbeFailureThreshold` consecutive failures (liveness gate in `refreshLock`). A
+  `healthProbeDeadlockGrace` escape hatch lets a degraded pod lead if no pod is healthy, so the
+  system never deadlocks leaderless (e.g. fresh install / total outage).
+
+**HealthProbe** (`src/main/java/io/jaredbrown/k8s/leader/elector/HealthProbe.java`)
+
+- Generic, tool-free fitness check: reads a status file the application maintains (typically on a
+  shared `emptyDir`). Healthy iff the file exists, is fresh (within `healthProbeMaxAge`), and its
+  trimmed content equals `healthProbeHealthyContent`. Returns `true` when probing is disabled and
+  never throws, so callers treat it as a simple boolean gate.
 
 **LockCallbacks** (`src/main/java/io/jaredbrown/k8s/leader/elector/LockCallbacks.java`)
 
