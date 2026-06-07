@@ -10,8 +10,11 @@ import org.springframework.integration.redis.util.RedisLockRegistry;
 import org.springframework.integration.support.locks.DistributedLock;
 import org.springframework.scheduling.TaskScheduler;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -53,11 +56,14 @@ class ElectorServiceTest {
     @Mock
     private HealthProbe healthProbe;
 
+    private MutableClock clock;
+
     private ElectorService electorService;
 
     @BeforeEach
     void setUp() {
-        electorService = new ElectorService(callbacks, electorProperties, lockRegistry, taskScheduler, healthProbe);
+        clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+        electorService = new ElectorService(callbacks, electorProperties, lockRegistry, taskScheduler, healthProbe, clock);
 
         // Default to healthy so the existing (probe-agnostic) tests behave exactly as before; the
         // health-gate tests below override this per case.
@@ -425,6 +431,50 @@ class ElectorServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void degradedLeader_afterRelinquishing_doesNotImmediatelyReacquireWithinGrace() throws Exception {
+        // Regression: with all pods unhealthy, the first leader breaks the deadlock once the grace
+        // elapses, then relinquishes on an unhealthy refresh. The very next acquisition attempt must
+        // start a FRESH grace window rather than re-leading on the stale timer — otherwise a single
+        // unhealthy pod monopolises leadership, re-taking it the instant it gives it up.
+        when(healthProbe.isHealthy()).thenReturn(false);
+        when(electorProperties.getHealthProbeDeadlockGrace()).thenReturn(Duration.ofMinutes(5));
+        when(electorProperties.getHealthProbeFailureThreshold()).thenReturn(1);
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
+
+        electorService.start();
+        final ArgumentCaptor<Runnable> loopCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(loopCaptor.capture(), any(Instant.class));
+        final Runnable lockLoop = loopCaptor.getValue();
+
+        // 1) First loop, still within grace: starts the deadlock timer but does not lead.
+        lockLoop.run();
+        verify(callbacks, never()).onLockAcquired();
+
+        // 2) Grace elapses → next loop breaks the deadlock and leads (degraded).
+        clock.advance(Duration.ofMinutes(6));
+        lockLoop.run();
+        verify(callbacks, times(1)).onLockAcquired();
+
+        // Fire the refresh: unhealthy at threshold 1 → relinquish leadership.
+        final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
+        refreshCaptor
+                .getValue()
+                .run();
+        verify(callbacks, times(1)).onLockLost();
+
+        // 3) Immediate re-acquire attempt, still unhealthy, no time advanced: must NOT re-lead,
+        //    proving the deadlock timer was reset on becoming leader (still only one acquisition).
+        lockLoop.run();
+        verify(callbacks, times(1)).onLockAcquired();
+    }
+
+    @Test
     void getPhase_shouldReturnIntegerMinValue() {
         // When
         final int phase = electorService.getPhase();
@@ -469,5 +519,38 @@ class ElectorServiceTest {
 
         // Then - should handle exception gracefully
         verify(lock).unlock();
+    }
+
+    // A hand-advanceable clock so deadlock-grace timing can be tested deterministically.
+    private static final class MutableClock extends Clock {
+        private Instant instant;
+
+        private MutableClock(final Instant start) {
+            this.instant = start;
+        }
+
+        private void advance(final Duration amount) {
+            this.instant = this.instant.plus(amount);
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
+
+        @Override
+        public long millis() {
+            return instant.toEpochMilli();
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(final ZoneId zone) {
+            return this;
+        }
     }
 }

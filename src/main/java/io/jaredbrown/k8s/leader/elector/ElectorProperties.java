@@ -1,5 +1,6 @@
 package io.jaredbrown.k8s.leader.elector;
 
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -56,7 +57,9 @@ public class ElectorProperties {
     private Duration healthProbeMaxAge = Duration.ofMinutes(2);
 
     // Consecutive probe failures tolerated while already leader before relinquishing. Absorbs a
-    // transient blip or a normal gravity rebuild without flapping leadership.
+    // transient blip or a normal gravity rebuild without flapping leadership. Must be >= 1 so a
+    // single probe failure cannot immediately demote the leader (0/negative would be nonsensical).
+    @Min(value = 1, message = "elector.healthProbeFailureThreshold must be at least 1")
     private int healthProbeFailureThreshold = 3;
 
     // If the lock is free but no pod is healthy, leadership would deadlock forever (e.g. a fresh

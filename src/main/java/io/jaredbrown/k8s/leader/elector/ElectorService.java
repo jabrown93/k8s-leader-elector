@@ -10,6 +10,7 @@ import org.springframework.integration.support.locks.DistributedLock;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -33,6 +34,8 @@ public class ElectorService implements SmartLifecycle {
     private final TaskScheduler taskScheduler;
     @Nonnull
     private final HealthProbe healthProbe;
+    @Nonnull
+    private final Clock clock;
 
     private final AtomicReference<DistributedLock> lock = new AtomicReference<>();
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -51,7 +54,7 @@ public class ElectorService implements SmartLifecycle {
         deadlockSince.set(null);
         consecutiveProbeFailures.set(0);
         log.info("Starting ElectorService");
-        taskScheduler.schedule(this::lockLoop, Instant.now());
+        taskScheduler.schedule(this::lockLoop, clock.instant());
     }
 
     @Override
@@ -113,15 +116,12 @@ public class ElectorService implements SmartLifecycle {
 
             if (acquired) {
                 if (healthy) {
-                    deadlockSince.set(null);
-                    consecutiveProbeFailures.set(0);
                     becomeLeader(newLock);
                 } else if (deadlockGraceExceeded()) {
                     log.warn("Breaking leadership deadlock: acquiring lock '{}' despite a failing health probe " +
                              "(no healthy candidate for at least {}). Leading in a DEGRADED state.",
                              electorProperties.getLockName(),
                              electorProperties.getHealthProbeDeadlockGrace());
-                    consecutiveProbeFailures.set(0);
                     becomeLeader(newLock);
                 } else {
                     // Lock is free but we're unhealthy and still within the grace window. Don't
@@ -155,6 +155,11 @@ public class ElectorService implements SmartLifecycle {
     }
 
     private void becomeLeader(final DistributedLock newLock) {
+        // Acquiring leadership ends any current free-lock standoff, so the deadlock-grace window
+        // must start fresh next time. Resetting here (rather than only on the healthy path) stops a
+        // degraded leader that later relinquishes from immediately re-acquiring on the stale timer.
+        deadlockSince.set(null);
+        consecutiveProbeFailures.set(0);
         lock.set(newLock);
         log.info("Lock '{}' acquired", electorProperties.getLockName());
         try {
@@ -173,7 +178,7 @@ public class ElectorService implements SmartLifecycle {
     // True once the lock has been observed free-but-this-pod-unhealthy for at least the configured
     // grace. Starts the timer on first such observation (returning false then).
     private boolean deadlockGraceExceeded() {
-        final Instant now = Instant.now();
+        final Instant now = clock.instant();
         final Instant witness = deadlockSince.compareAndExchange(null, now);
         final Instant since = (witness == null) ? now : witness;
         return Duration
@@ -184,8 +189,8 @@ public class ElectorService implements SmartLifecycle {
     private void scheduleRetry() {
         if (running.get()) {
             taskScheduler.schedule(this::lockLoop,
-                                   Instant
-                                           .now()
+                                   clock
+                                           .instant()
                                            .plus(electorProperties.getRetryPeriod()));
         }
     }
@@ -195,8 +200,8 @@ public class ElectorService implements SmartLifecycle {
     private void scheduleRefreshTask() {
         cancelRefreshTask();
         final ScheduledFuture<?> future = taskScheduler.scheduleAtFixedRate(this::refreshLock,
-                                                                            Instant
-                                                                              .now()
+                                                                            clock
+                                                                              .instant()
                                                                               .plus(electorProperties.getRenewDeadline()),
                                                                             electorProperties.getRenewDeadline());
         refreshFuture.set(future);
@@ -251,7 +256,7 @@ public class ElectorService implements SmartLifecycle {
 
         if (running.get()) {
             log.info("Scheduling re-acquire of lock after loss");
-            taskScheduler.schedule(this::lockLoop, Instant.now());
+            taskScheduler.schedule(this::lockLoop, clock.instant());
         }
     }
 
