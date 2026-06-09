@@ -55,6 +55,7 @@ class ElectorPropertiesTest {
         assertEquals(Duration.ofMinutes(2), properties.getHealthProbeMaxAge());
         assertEquals(3, properties.getHealthProbeFailureThreshold());
         assertEquals(Duration.ofMinutes(5), properties.getHealthProbeDeadlockGrace());
+        assertEquals(Duration.ofSeconds(30), properties.getHealthProbeUnhealthyBackoff());
     }
 
     @Test
@@ -271,6 +272,28 @@ class ElectorPropertiesTest {
                                    .getPropertyPath()
                                    .toString()
                                    .equals("retryPeriod")));
+    }
+
+    @Test
+    void shouldFailValidationWhenHealthProbeUnhealthyBackoffIsNull() {
+        // Given
+        final ElectorProperties properties = new ElectorProperties();
+        properties.setLabelKey("test-label");
+        properties.setLockName("test-lock");
+        properties.setSelectorLabelValue("test-app");
+        properties.setHealthProbeUnhealthyBackoff(null);
+
+        // When
+        final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
+
+        // Then
+        assertFalse(violations.isEmpty());
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("healthProbeUnhealthyBackoff")));
     }
 
     @Test

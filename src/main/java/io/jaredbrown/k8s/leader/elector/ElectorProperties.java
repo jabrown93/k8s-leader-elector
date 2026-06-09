@@ -67,4 +67,14 @@ public class ElectorProperties {
     // pod-unhealthy for this long, acquire it anyway and lead in a degraded state.
     @NotNull
     private Duration healthProbeDeadlockGrace = Duration.ofMinutes(5);
+
+    // How long an UNHEALTHY pod backs off before re-probing for leadership, instead of the tight
+    // retryPeriod a healthy pod uses. An unhealthy ex-leader that keeps re-acquiring the free lock
+    // every retryPeriod (to test eligibility) and releasing it starves the healthy peers that are
+    // trying to take over — a livelock that leaves the deployment leaderless. Backing off well past
+    // retryPeriod gives healthy peers uncontested acquisition windows so one of them leads promptly.
+    // Should comfortably exceed retryPeriod; well under healthProbeDeadlockGrace so the all-unhealthy
+    // escape hatch still fires on time (the unhealthy pod still re-probes ~grace/backoff times).
+    @NotNull
+    private Duration healthProbeUnhealthyBackoff = Duration.ofSeconds(30);
 }
