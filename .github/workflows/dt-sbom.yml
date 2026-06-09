@@ -6,11 +6,13 @@
 # Two jobs, because only one of them may touch the cluster:
 #   sbom   - hosted runner: resolve the full Maven dependency graph and emit
 #            target/sbom.cdx.json (cyclonedx-maven-plugin) plus project.env.
-#   upload - in-cluster arc-oss runner: exchange this run's GitHub OIDC token
-#            for the Dependency-Track CI key via OpenBao (vault-action), then
-#            POST the SBOM. arc-oss is egress-locked to a few in-cluster
-#            services, so OpenBao and DT are addressed by their in-cluster
-#            Service DNS names, not the public gateway. See
+#   upload - in-cluster arc-oss-k8s-leader-elector runner: exchange this run's
+#            GitHub OIDC token for the Dependency-Track CI key via OpenBao
+#            (vault-action), then POST the SBOM. The runner is egress-locked to a
+#            few in-cluster services, so OpenBao and DT are addressed by their
+#            in-cluster Service DNS names, not the public gateway. The set is
+#            REPO-scoped (one arc-oss-<repo> set per OSS repo; a user account
+#            can't host shared runners). See
 #            github.com/jabrown93/homelab -> docs/dependency-track.md.
 #
 # push-to-main + manual only: never runs on pull_request, so fork PR code can't
@@ -61,7 +63,7 @@ jobs:
 
   upload:
     needs: sbom
-    runs-on: arc-oss
+    runs-on: arc-oss-k8s-leader-elector
     permissions:
       contents: read
       id-token: write
