@@ -125,19 +125,31 @@ public class ElectorService implements SmartLifecycle {
                     becomeLeader(newLock);
                 } else {
                     // Lock is free but we're unhealthy and still within the grace window. Don't
-                    // lead yet — release so a healthy peer can take over — and back off well past
-                    // retryPeriod. Retrying on the tight retryPeriod here re-grabs the free lock every
-                    // few seconds and starves the healthy peers racing for it (a livelock that leaves
-                    // the deployment leaderless); the longer backoff yields uncontested windows.
-                    log.info("Lock '{}' is free but this pod fails its health probe; not eligible to lead yet, " +
-                             "releasing and backing off {} so a healthy peer can lead",
-                             electorProperties.getLockName(), electorProperties.getHealthProbeUnhealthyBackoff());
+                    // lead yet — release so a healthy peer can take over.
+                    boolean released = true;
                     try {
                         newLock.unlock();
                     } catch (final Exception e) {
+                        released = false;
                         log.error("Error releasing transiently held lock", e);
                     }
-                    scheduleUnhealthyRetry();
+                    if (released) {
+                        // Released cleanly: back off well past retryPeriod so we stop re-grabbing the
+                        // free lock every few seconds and starving the healthy peers racing for it (the
+                        // livelock that leaves the deployment leaderless); the backoff yields them
+                        // uncontested windows.
+                        log.info("Lock '{}' is free but this pod fails its health probe; released and " +
+                                 "backing off {} so a healthy peer can lead",
+                                 electorProperties.getLockName(), electorProperties.getHealthProbeUnhealthyBackoff());
+                        scheduleUnhealthyRetry();
+                    } else {
+                        // Release failed, so we may still hold the lock — backing off the long interval
+                        // would keep healthy peers blocked. Re-probe on the short retryPeriod to retry
+                        // the release promptly instead.
+                        log.warn("Lock '{}' may still be held after a failed release; retrying in {} to release it",
+                                 electorProperties.getLockName(), electorProperties.getRetryPeriod());
+                        scheduleRetry();
+                    }
                 }
             } else {
                 // Someone else holds the lock: a leader exists, so we are not deadlocked.
