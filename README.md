@@ -36,6 +36,11 @@ to a status file (typically on a shared `emptyDir`) and refreshes it; the electo
 - **Deadlock escape hatch:** if the lock is free but *no* pod is healthy (fresh install, total
   outage), after `ELECTOR_HEALTH_PROBE_DEADLOCK_GRACE` a pod acquires it anyway and leads in a
   logged "degraded" state, rather than leaving the system leaderless forever.
+- **Unhealthy backoff:** an unhealthy pod still re-probes for the lock (to feed the deadlock escape
+  hatch), but on the longer `ELECTOR_HEALTH_PROBE_UNHEALTHY_BACKOFF` interval rather than the tight
+  `ELECTOR_RETRY_PERIOD`. Without this, an unhealthy ex-leader re-grabbing the free lock every retry
+  period and releasing it starves the healthy peers racing to take over — a livelock that leaves the
+  deployment leaderless until the unhealthy pod happens to recover.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -45,5 +50,6 @@ to a status file (typically on a shared `emptyDir`) and refreshes it; the electo
 | `ELECTOR_HEALTH_PROBE_MAX_AGE` | `2m` | Reject the file if not updated within this window (`0` disables) |
 | `ELECTOR_HEALTH_PROBE_FAILURE_THRESHOLD` | `3` | Consecutive failures tolerated while leading |
 | `ELECTOR_HEALTH_PROBE_DEADLOCK_GRACE` | `5m` | How long to wait before leading degraded when no pod is healthy |
+| `ELECTOR_HEALTH_PROBE_UNHEALTHY_BACKOFF` | `30s` | Re-probe interval for an unhealthy pod (keeps it from starving healthy peers) |
 
 

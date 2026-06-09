@@ -84,6 +84,9 @@ class ElectorServiceTest {
         lenient()
                 .when(electorProperties.getLeaseDuration())
                 .thenReturn(Duration.ofSeconds(120));
+        lenient()
+                .when(electorProperties.getHealthProbeUnhealthyBackoff())
+                .thenReturn(Duration.ofSeconds(30));
     }
 
     @Test
@@ -332,11 +335,70 @@ class ElectorServiceTest {
                 .getValue()
                 .run();
 
-        // Then: it does not lead, releases the transiently-held lock, and retries
+        // Then: it does not lead, releases the transiently-held lock, and re-probes — but on the
+        // longer unhealthy backoff (30s), NOT the tight retryPeriod (5s). Re-grabbing the free lock
+        // every retryPeriod is exactly the livelock that starves the healthy peers racing for it.
         verify(callbacks, never()).onLockAcquired();
         verify(lock).unlock();
         verify(taskScheduler, never()).scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class));
-        verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(Instant.class));
+        final ArgumentCaptor<Instant> whenCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(taskScheduler, times(2)).schedule(any(Runnable.class), whenCaptor.capture());
+        final Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
+        assertEquals(t0.plus(Duration.ofSeconds(30)), whenCaptor
+                .getAllValues()
+                .get(1));
+    }
+
+    @Test
+    void lockLoop_shouldBackOffNotTightRetryWhenUnhealthyAndLeaderExists() throws Exception {
+        // Given: a leader already exists (lock not acquirable) and this pod is unhealthy.
+        when(healthProbe.isHealthy()).thenReturn(false);
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(false);
+
+        electorService.start();
+        final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
+
+        // When
+        runnableCaptor
+                .getValue()
+                .run();
+
+        // Then: an unhealthy pod has no business racing for leadership, so it re-probes on the
+        // longer backoff (30s) rather than the retryPeriod (5s) a healthy pod would use here.
+        verify(callbacks, never()).onLockAcquired();
+        final ArgumentCaptor<Instant> whenCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(taskScheduler, times(2)).schedule(any(Runnable.class), whenCaptor.capture());
+        final Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
+        assertEquals(t0.plus(Duration.ofSeconds(30)), whenCaptor
+                .getAllValues()
+                .get(1));
+    }
+
+    @Test
+    void lockLoop_shouldUseRetryPeriodWhenHealthyAndLeaderExists() throws Exception {
+        // Given: healthy (default) and a leader already exists.
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(false);
+
+        electorService.start();
+        final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
+
+        // When
+        runnableCaptor
+                .getValue()
+                .run();
+
+        // Then: a healthy contender keeps re-probing on the tight retryPeriod (5s) so it takes over
+        // promptly the moment the lock frees — the backoff is only for unhealthy pods.
+        final ArgumentCaptor<Instant> whenCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(taskScheduler, times(2)).schedule(any(Runnable.class), whenCaptor.capture());
+        final Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
+        assertEquals(t0.plus(Duration.ofSeconds(5)), whenCaptor
+                .getAllValues()
+                .get(1));
     }
 
     @Test

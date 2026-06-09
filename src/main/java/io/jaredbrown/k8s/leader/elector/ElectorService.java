@@ -125,21 +125,33 @@ public class ElectorService implements SmartLifecycle {
                     becomeLeader(newLock);
                 } else {
                     // Lock is free but we're unhealthy and still within the grace window. Don't
-                    // lead yet — release so a healthy peer can take over — and retry.
+                    // lead yet — release so a healthy peer can take over — and back off well past
+                    // retryPeriod. Retrying on the tight retryPeriod here re-grabs the free lock every
+                    // few seconds and starves the healthy peers racing for it (a livelock that leaves
+                    // the deployment leaderless); the longer backoff yields uncontested windows.
                     log.info("Lock '{}' is free but this pod fails its health probe; not eligible to lead yet, " +
-                             "releasing and retrying", electorProperties.getLockName());
+                             "releasing and backing off {} so a healthy peer can lead",
+                             electorProperties.getLockName(), electorProperties.getHealthProbeUnhealthyBackoff());
                     try {
                         newLock.unlock();
                     } catch (final Exception e) {
                         log.error("Error releasing transiently held lock", e);
                     }
-                    scheduleRetry();
+                    scheduleUnhealthyRetry();
                 }
             } else {
                 // Someone else holds the lock: a leader exists, so we are not deadlocked.
                 deadlockSince.set(null);
-                log.info("Could not acquire lock, will retry in {}", electorProperties.getRetryPeriod());
-                scheduleRetry();
+                // An unhealthy pod still backs off the longer interval: it has no business racing for
+                // leadership, and a tight retry only adds churn while a leader already exists.
+                if (healthy) {
+                    log.info("Could not acquire lock, will retry in {}", electorProperties.getRetryPeriod());
+                    scheduleRetry();
+                } else {
+                    log.info("Could not acquire lock (a leader exists); unhealthy, will retry in {}",
+                             electorProperties.getHealthProbeUnhealthyBackoff());
+                    scheduleUnhealthyRetry();
+                }
             }
         } catch (final InterruptedException e) {
             Thread
@@ -192,6 +204,17 @@ public class ElectorService implements SmartLifecycle {
                                    clock
                                            .instant()
                                            .plus(electorProperties.getRetryPeriod()));
+        }
+    }
+
+    // Re-probe schedule for an UNHEALTHY pod: a longer backoff than retryPeriod so it stops
+    // contending for the lock every few seconds and lets healthy peers take over (see lockLoop).
+    private void scheduleUnhealthyRetry() {
+        if (running.get()) {
+            taskScheduler.schedule(this::lockLoop,
+                                   clock
+                                           .instant()
+                                           .plus(electorProperties.getHealthProbeUnhealthyBackoff()));
         }
     }
 
