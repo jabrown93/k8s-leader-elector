@@ -21,6 +21,7 @@
         <main.class>io.jaredbrown.k8s.leader.Application</main.class>
         <lombok.version>1.18.46</lombok.version>
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
+        <cyclonedx-maven-plugin.version>2.9.1</cyclonedx-maven-plugin.version>
         <spring-cloud-dependencies.version>2025.1.1</spring-cloud-dependencies.version>
         <log4j-bom.version>2.26.0</log4j-bom.version>
     </properties>
@@ -120,6 +121,20 @@
                             <artifactId>lombok</artifactId>
                         </path>
                     </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <!-- CycloneDX SBOM generation. No <executions>, so it does not bind
+                 to the build lifecycle (CI `mvn verify` and the release build are
+                 unaffected); the dt-sbom workflow invokes it explicitly via
+                 `mvn cyclonedx:makeAggregateBom`, producing target/sbom.cdx.json. -->
+            <plugin>
+                <groupId>org.cyclonedx</groupId>
+                <artifactId>cyclonedx-maven-plugin</artifactId>
+                <version>${cyclonedx-maven-plugin.version}</version>
+                <configuration>
+                    <projectType>application</projectType>
+                    <outputFormat>json</outputFormat>
+                    <outputName>sbom.cdx</outputName>
                 </configuration>
             </plugin>
         </plugins>
