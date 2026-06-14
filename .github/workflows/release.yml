@@ -61,6 +61,10 @@ jobs:
         context: .
         file: ./Dockerfile
         push: true
+        # Attach a CycloneDX SBOM + max provenance as OCI referrers on the image
+        # (inspect: `docker buildx imagetools inspect --format '{{json .SBOM}}' <img>`).
+        provenance: mode=max
+        sbom: true
         platforms: linux/amd64,linux/arm64
         tags: |
           ghcr.io/${{ github.repository_owner }}/k8s-leader-elector:${{ env.VERSION }}
