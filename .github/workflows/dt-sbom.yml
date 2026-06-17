@@ -36,10 +36,10 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.3
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up JDK 25
-        uses: actions/setup-java@v5.2.0
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
         with:
           distribution: corretto
           java-version: '25'
@@ -49,7 +49,7 @@ jobs:
         run: mvn -B cyclonedx:makeAggregateBom
 
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom
           if-no-files-found: error
@@ -63,13 +63,13 @@ jobs:
       id-token: write
     steps:
       - name: Download SBOM artifact
-        uses: actions/download-artifact@v8.0.1
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sbom
 
       - name: Fetch DT API key from OpenBao
         id: bao
-        uses: hashicorp/vault-action@v4.0.0
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://openbao-active.openbao.svc.cluster.local:8200
           tlsSkipVerify: true
