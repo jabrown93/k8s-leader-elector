@@ -11,7 +11,7 @@ COPY target/leader-elector-*.jar /app/leader-elector.jar
 WORKDIR /app
 
 # === Final stage: Create minimal runtime image ===
-FROM dhi.io/amazoncorretto:25.0.3-alpine3.22
+FROM dhi.io/amazoncorretto:25.0.3-alpine3.24
 
 WORKDIR /app
 
