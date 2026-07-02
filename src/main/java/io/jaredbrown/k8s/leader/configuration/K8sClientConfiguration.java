@@ -16,8 +16,8 @@ public class K8sClientConfiguration {
     // extreme, stall lock renewal past the lease while a label reconcile is in flight. Bound both so a
     // whole leader-label reconcile of a handful of pods finishes well inside the release window and
     // the lease, keeping the scheduler thread responsive.
-    private static final int REQUEST_TIMEOUT_MILLIS = 2500;
-    private static final int REQUEST_RETRY_BACKOFF_LIMIT = 3;
+    private static final int REQUEST_TIMEOUT_MILLIS = 2000;
+    private static final int REQUEST_RETRY_BACKOFF_LIMIT = 1
 
     @Bean(destroyMethod = "close")
     public KubernetesClient kubernetesClient() {
