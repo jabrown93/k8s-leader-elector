@@ -17,7 +17,7 @@ public class K8sClientConfiguration {
     // whole leader-label reconcile of a handful of pods finishes well inside the release window and
     // the lease, keeping the scheduler thread responsive.
     private static final int REQUEST_TIMEOUT_MILLIS = 2000;
-    private static final int REQUEST_RETRY_BACKOFF_LIMIT = 1
+    private static final int REQUEST_RETRY_BACKOFF_LIMIT = 1;
 
     @Bean(destroyMethod = "close")
     public KubernetesClient kubernetesClient() {
