@@ -7,7 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.integration.redis.util.RedisLockRegistry;
 import org.springframework.integration.support.locks.DistributedLock;
-import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -24,14 +24,20 @@ import java.util.concurrent.atomic.AtomicReference;
 @Service
 @RequiredArgsConstructor
 public class ElectorService implements SmartLifecycle {
+    // Upper bound on how long stop() waits for the scheduler thread to release the lock (see
+    // awaitLockRelease). Comfortably inside a pod's terminationGracePeriodSeconds.
+    private static final Duration RELEASE_TIMEOUT = Duration.ofSeconds(5);
+
     @Nonnull
     private final LockCallbacks callbacks;
     @Nonnull
     private final ElectorProperties electorProperties;
     @Nonnull
     private final RedisLockRegistry lockRegistry;
+    // Concrete type (not the TaskScheduler interface) because stop() needs submit()'s Future to
+    // wait for the shutdown-time lock release; see awaitLockRelease.
     @Nonnull
-    private final TaskScheduler taskScheduler;
+    private final ThreadPoolTaskScheduler taskScheduler;
     @Nonnull
     private final HealthProbe healthProbe;
     @Nonnull
@@ -54,6 +60,9 @@ public class ElectorService implements SmartLifecycle {
         deadlockSince.set(null);
         consecutiveProbeFailures.set(0);
         log.info("Starting ElectorService");
+        // So a freshly (re)created pod carries the label from boot rather than staying unlabeled
+        // until it wins or loses its first election.
+        callbacks.ensureSelfLabeled();
         taskScheduler.schedule(this::lockLoop, clock.instant());
     }
 
@@ -62,7 +71,7 @@ public class ElectorService implements SmartLifecycle {
         log.info("Stopping ElectorService");
         running.set(false);
         cancelRefreshTask();
-        releaseLockIfHeld();
+        awaitLockRelease();
     }
 
     @Override
@@ -83,9 +92,40 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
+    // DistributedLock.unlock() is thread-owned (RedisLockRegistry.RedisLock wraps a local
+    // ReentrantLock and throws IllegalStateException if unlocked off-thread). Acquisition always
+    // happens on the taskScheduler thread (lockLoop/refreshLock), but SmartLifecycle#stop() runs on
+    // whatever thread Spring's context shutdown uses, so releasing directly here would always fail
+    // and leak the Redis key for the full lease TTL. Route the release through the scheduler thread
+    // instead and wait briefly for it to finish.
+    private void awaitLockRelease() {
+        try {
+            taskScheduler
+                    .submit(this::releaseLockAndClearLabelIfHeld)
+                    .get(RELEASE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (final InterruptedException e) {
+            Thread
+                    .currentThread()
+                    .interrupt();
+            log.warn("Interrupted while releasing lock during shutdown", e);
+        } catch (final Exception e) {
+            log.error("Failed to release lock during shutdown within {}", RELEASE_TIMEOUT, e);
+        }
+    }
+
+    // Runs on the scheduler thread (see awaitLockRelease). Only a pod that was actually leading
+    // needs its label cleared here - a non-leader pod's label is already false.
+    private void releaseLockAndClearLabelIfHeld() {
+        if (releaseLockIfHeld()) {
+            callbacks.onShutdown();
+        }
+    }
+
     // --- Refresh logic: interval is configurable via electorProperties.getRenewDeadline() ---
 
-    private void releaseLockIfHeld() {
+    // Returns whether this pod was holding the lock (i.e. was leader), regardless of whether the
+    // unlock call itself succeeded.
+    private boolean releaseLockIfHeld() {
         final DistributedLock currentLock = lock.getAndSet(null);
         if (currentLock != null) {
             try {
@@ -94,7 +134,9 @@ public class ElectorService implements SmartLifecycle {
             } catch (final Exception e) {
                 log.error("Error while releasing lock", e);
             }
+            return true;
         }
+        return false;
     }
 
     private void lockLoop() {
@@ -187,7 +229,7 @@ public class ElectorService implements SmartLifecycle {
         lock.set(newLock);
         log.info("Lock '{}' acquired", electorProperties.getLockName());
         try {
-            callbacks.onLockAcquired();
+            callbacks.onLockAcquired(this::stillOwnsLock);
         } catch (final Exception e) {
             log.error("Lock acquired, but post-acquire callback failed; releasing lock and retrying in {}",
                       electorProperties.getRetryPeriod(),
@@ -271,14 +313,59 @@ public class ElectorService implements SmartLifecycle {
                 consecutiveProbeFailures.set(0);
             }
 
-            lockRegistry.renewLock(electorProperties.getLockName(), electorProperties.getLeaseDuration());
-            log.debug("Lock TTL extended by {} seconds",
-                      electorProperties
-                              .getLeaseDuration()
-                              .get(ChronoUnit.SECONDS));
+            renewLockWithRetry();
+            // Self-heals any label a prior attempt failed to set (slow API server, a pod created
+            // after the last election) instead of leaving it wrong until the next leadership change.
+            // Passes stillOwnsLock so a reconcile that outlives the lease stops before stamping stale
+            // labels once another pod has taken over.
+            callbacks.reconcileLeaderLabels(this::stillOwnsLock);
         } catch (final Exception e) {
             log.error("Error while refreshing lock, treating as lock lost", e);
             handleLockLost();
+        }
+    }
+
+    // A single transient Redis blip should not cost leadership outright: renewDeadline (60s
+    // default) leaves ample slack before the lease (120s default) actually expires, so one
+    // immediate retry absorbs a blip that would otherwise trigger a full re-election.
+    private void renewLockWithRetry() {
+        try {
+            renewLockOnce();
+        } catch (final Exception first) {
+            log.warn("First attempt to renew lock '{}' failed, retrying once immediately",
+                     electorProperties.getLockName(),
+                     first);
+            renewLockOnce();
+        }
+    }
+
+    private void renewLockOnce() {
+        lockRegistry.renewLock(electorProperties.getLockName(), electorProperties.getLeaseDuration());
+        log.debug("Lock TTL extended by {} seconds",
+                  electorProperties
+                          .getLeaseDuration()
+                          .get(ChronoUnit.SECONDS));
+    }
+
+    // Re-confirms this pod still holds the Redis lock, and refreshes its lease as a side effect.
+    // Passed into LockCallbacks#reconcileLeaderLabels so a long-running label reconcile stops the
+    // moment ownership is lost instead of stamping stale labels. renewLock's Lua script only extends
+    // the key while Redis still maps it to THIS registry's client id, so a thrown/false result is a
+    // genuine "no longer the owner" signal (a lapsed lease another pod already took), not just local
+    // state — a purely local check can't see a Redis-side takeover. Runs on the scheduler thread, the
+    // same thread as the reconcile that calls it.
+    boolean stillOwnsLock() {
+        if (lock.get() == null) {
+            return false;
+        }
+        try {
+            lockRegistry.renewLock(electorProperties.getLockName(), electorProperties.getLeaseDuration());
+            return true;
+        } catch (final Exception e) {
+            log.warn("Could not confirm Redis ownership of lock '{}' mid-reconcile; treating as lost",
+                     electorProperties.getLockName(),
+                     e);
+            return false;
         }
     }
 

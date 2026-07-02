@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 @Slf4j
 @Component
@@ -26,12 +28,27 @@ public class LockCallbacks {
     @Value("${POD_NAME:unknown}")
     private String selfPodName;
 
-    public void onLockAcquired() {
-        log.info("Lock acquired - updating leader labels across deployment");
-        final String namespace = kubernetesClient.getNamespace();
+    public void onLockAcquired(final BooleanSupplier stillLeader) {
+        log.info("Lock acquired - reconciling leader labels across deployment");
+        reconcileLeaderLabels(stillLeader);
+    }
 
+    // Brings every pod's leader label in line with the current election result: true on self,
+    // false on everyone else. Idempotent (skips pods whose label already matches) and safe to call
+    // repeatedly, so ElectorService also calls this on every successful lock renewal — that self-
+    // heals a label a prior attempt failed to set (a slow API server, a pod created after the last
+    // election) instead of leaving it wrong until the next leadership change. Never throws: a
+    // labeling problem is a side effect of leadership, not a reason to give it up, and the next
+    // renewal tick (at most renewDeadline away) retries automatically.
+    //
+    // stillLeader re-confirms leadership (Redis-side; see ElectorService#stillOwnsLock) immediately
+    // before mutating each drifted pod. A reconcile that outlives the lease — a very slow API server
+    // or many drifted pods — must not keep stamping this pod's stale identity after another pod has
+    // taken over the lock, which would flip the new leader's label back to false and leave the
+    // deployment momentarily leaderless until the new leader's next reconcile.
+    public void reconcileLeaderLabels(final BooleanSupplier stillLeader) {
+        final String namespace = kubernetesClient.getNamespace();
         try {
-            // Get all pods in the deployment
             final List<Pod> pods = kubernetesClient
                     .pods()
                     .inNamespace(namespace)
@@ -39,44 +56,49 @@ public class LockCallbacks {
                     .list()
                     .getItems();
 
-            int nonLeaderUpdateFailures = 0;
-
-            // Update all pods: set leader=true on self, leader=false on others
+            int updated = 0;
+            int failures = 0;
             for (final Pod pod : pods) {
                 final String podName = pod
                         .getMetadata()
                         .getName();
                 final boolean isLeader = podName.equals(selfPodName);
 
-                if (isLeader) {
-                    try {
-                        patchPodLeaderLabel(namespace, podName, true);
-                    } catch (final KubernetesClientException e) {
-                        final String message = "Failed to update leader label on elected pod " + selfPodName;
-                        log.error(message, e);
-                        throw new IllegalStateException(message, e);
-                    }
-                } else if (!updateNonLeaderPodLabel(namespace, podName)) {
-                    nonLeaderUpdateFailures++;
+                if (!needsLabelUpdate(pod, isLeader)) {
+                    continue;
+                }
+                if (!stillLeader.getAsBoolean()) {
+                    log.warn("Halting leader-label reconcile: leadership no longer confirmed " +
+                             "(was leaderPod={}, {} pods updated before ownership was lost)", selfPodName, updated);
+                    return;
+                }
+                if (updatePodLeaderLabel(namespace, podName, isLeader)) {
+                    updated++;
+                } else {
+                    failures++;
                 }
             }
 
-            final int nonLeaderPods = pods.size() - 1;
-            if (nonLeaderUpdateFailures == 0) {
-                log.info("Successfully updated leader labels: {} is leader, {} other pods marked as non-leader",
-                         selfPodName,
-                         nonLeaderPods);
-            } else {
-                log.warn("Updated leader label on {}, but failed to mark {} of {} other pods as non-leader",
-                         selfPodName,
-                         nonLeaderUpdateFailures,
-                         nonLeaderPods);
+            if (updated > 0 || failures > 0) {
+                log.info("Reconciled leader labels: {} updated, {} failed ({} pods total, leaderPod={})",
+                         updated,
+                         failures,
+                         pods.size(),
+                         selfPodName);
             }
         } catch (final KubernetesClientException e) {
-            final String message = "Failed to update leader labels on lock acquisition";
-            log.error(message, e);
-            throw new IllegalStateException(message, e);
+            log.error("Failed to list pods while reconciling leader labels; will retry on next reconcile", e);
         }
+    }
+
+    private boolean needsLabelUpdate(final Pod pod, final boolean isLeader) {
+        final Map<String, String> labels = pod
+                .getMetadata()
+                .getLabels();
+        final String current = labels == null ? null : labels.get(electorProperties.getLabelKey());
+        return !Boolean
+                .toString(isLeader)
+                .equals(current);
     }
 
     private void patchPodLeaderLabel(final String namespace, final String podName, final boolean isLeader) {
@@ -94,19 +116,41 @@ public class LockCallbacks {
         log.debug("Set {}={} on pod {}", electorProperties.getLabelKey(), isLeader, podName);
     }
 
-    private boolean updateNonLeaderPodLabel(final String namespace, final String podName) {
+    private boolean updatePodLeaderLabel(final String namespace, final String podName, final boolean isLeader) {
         try {
-            patchPodLeaderLabel(namespace, podName, false);
+            patchPodLeaderLabel(namespace, podName, isLeader);
             return true;
         } catch (final KubernetesClientException e) {
-            log.warn("Failed to update leader label on pod {}", podName, e);
+            if (isLeader) {
+                log.error("Failed to update leader label on elected pod {}; will retry on next reconcile",
+                          podName,
+                          e);
+            } else {
+                log.warn("Failed to update leader label on pod {}", podName, e);
+            }
             return false;
         }
     }
 
+    // Called once on startup so a freshly (re)created pod always carries the label from boot
+    // instead of staying unlabeled until it wins (or loses) its first election.
+    public void ensureSelfLabeled() {
+        log.info("Initializing leader label on self at startup");
+        updatePodLeaderLabel(kubernetesClient.getNamespace(), selfPodName, false);
+    }
+
     public void onLockLost() {
         log.warn("Lock lost - removing leader label from self");
-        final String namespace = kubernetesClient.getNamespace();
-        updateNonLeaderPodLabel(namespace, selfPodName);
+        updatePodLeaderLabel(kubernetesClient.getNamespace(), selfPodName, false);
+    }
+
+    // Called on graceful shutdown, but only for a pod that was actually leading (see
+    // ElectorService#releaseLockAndClearLabelIfHeld) — otherwise the label is already false. Without
+    // this, a departing leader would stay labeled true for the rest of its terminationGracePeriod,
+    // which anything selecting directly on the label (not just the Service, which drops NotReady
+    // endpoints immediately) could still match.
+    public void onShutdown() {
+        log.info("Shutting down while leading - removing leader label from self");
+        updatePodLeaderLabel(kubernetesClient.getNamespace(), selfPodName, false);
     }
 }

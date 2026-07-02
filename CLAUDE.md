@@ -8,7 +8,8 @@ This is a Kubernetes leader election sidecar application that:
 
 - Acquires distributed leadership using Redis-based locks (via Spring Integration)
 - Labels the leader Pod with a configurable label (default: `dns.jb.io/leader=true`)
-- Manages label state on leadership changes across all Pods in the StatefulSet/Deployment
+- Manages label state on leadership changes across all Pods in the StatefulSet/Deployment,
+  re-reconciling it on every lock renewal so a missed or late-created pod self-heals
 
 **Status**: Under active development, bugs are likely.
 
@@ -62,8 +63,12 @@ The application requires:
 
 - Implements Spring `SmartLifecycle` to manage distributed lock lifecycle
 - Uses `RedisLockRegistry` from Spring Integration for distributed locking
+- On `start()`, labels self `leader=false` (`callbacks.ensureSelfLabeled()`) before the first
+  acquisition attempt, so a freshly (re)created pod never sits unlabeled
 - Lock acquisition loop with configurable retry period
-- Automatic lock renewal via scheduled executor at `renewDeadline` interval
+- Automatic lock renewal via scheduled executor at `renewDeadline` interval; a failed renew is
+  retried once immediately before the lock is treated as lost (absorbs a single transient Redis
+  blip). A successful renew also re-runs `callbacks.reconcileLeaderLabels()`
 - Handles lock loss and attempts reacquisition automatically
 - Optional health gating (when `healthProbeEnabled`): an unhealthy pod won't acquire the lock
   (eligibility gate in `lockLoop`), and a leader that goes unhealthy relinquishes after
@@ -80,9 +85,16 @@ The application requires:
 
 **LockCallbacks** (`src/main/java/io/jaredbrown/k8s/leader/elector/LockCallbacks.java`)
 
-- Executed by ElectorService on lock state changes
-- `onLockAcquired()`: Labels all pods with matching `app` label, setting leader=true on self
-- `onLockLost()`: Removes leader label from self
+- Executed by ElectorService on lock state changes and on every successful renewal
+- `reconcileLeaderLabels()`: idempotent — lists all pods with the matching selector label and
+  patches only those whose label differs from the desired value (leader=true on self, =false on
+  everyone else). Never throws; a labeling failure is logged and retried on the next reconcile
+  (acquisition, or the next renewal tick at most `renewDeadline` later) rather than costing
+  leadership.
+- `onLockAcquired()`: delegates to `reconcileLeaderLabels()`
+- `ensureSelfLabeled()`: called once on startup so a freshly (re)created pod carries the label from
+  boot instead of staying unlabeled until its first election
+- `onLockLost()`: removes leader label from self
 - Uses Fabric8 Kubernetes client to patch Pod labels
 
 **RedisLockRegistryConfiguration** (
@@ -103,12 +115,16 @@ Configuration properties (prefix: `elector`):
 
 ### Lifecycle Flow
 
-1. **Startup**: ElectorService starts via SmartLifecycle (phase: Integer.MIN_VALUE for early start)
+1. **Startup**: ElectorService starts via SmartLifecycle (phase: Integer.MIN_VALUE for early start);
+   labels self `leader=false` before the first acquisition attempt
 2. **Lock Acquisition**: Attempts to acquire lock from Redis, retries every `retryPeriod`
 3. **Leadership**: On acquisition, schedules lock renewal task and calls `onLockAcquired()`
-4. **Lock Maintenance**: Renews lock every `renewDeadline` seconds
-5. **Lock Loss**: If renewal fails or lock lost, calls `onLockLost()` and re-enters acquisition loop
-6. **Shutdown**: PreDestroy hook releases lock gracefully
+   (reconciles leader labels)
+4. **Lock Maintenance**: Renews lock every `renewDeadline` seconds (one immediate retry on a failed
+   renew), then re-reconciles leader labels
+5. **Lock Loss**: If renewal fails (after its retry) or lock lost, calls `onLockLost()` and
+   re-enters acquisition loop
+6. **Shutdown**: PreDestroy hook cancels renewal and releases the lock via the scheduler thread
 
 ### Key Dependencies
 
@@ -143,25 +159,68 @@ See `src/main/resources/application.properties`:
 
 ### Pod Labeling Strategy
 
-On lock acquisition, the service ensures exactly one pod has the leader label:
+`reconcileLeaderLabels()` brings every pod's label in line with the current election result, and is
+called both on acquisition and on every successful renewal (not a one-shot):
 
 1. Queries all Pods with label `app={elector.appName}`
-2. Updates all pods atomically:
-    - Sets `{elector.labelKey}=true` on the current pod (new leader)
-    - Sets `{elector.labelKey}=false` on all other pods (former leaders)
+2. For each pod whose current `{elector.labelKey}` value doesn't already match the desired one:
+    - Sets `{elector.labelKey}=true` on the current pod (leader)
+    - Sets `{elector.labelKey}=false` on every other pod
+3. Pods whose label already matches are skipped (idempotent — safe to call every renewal tick)
 
-This two-phase approach ensures only one pod has the leader label at any given time.
-Individual pod label update failures are logged but don't prevent updating other pods.
-The entire operation fails only if the initial pod list query fails.
+Individual pod label update failures are logged but don't prevent updating other pods, and never
+throw: a labeling problem is a side effect of leadership, not a reason to give it up. A pod list
+query failure is likewise logged and retried on the next reconcile rather than escalated. This
+means a slow API server, or a pod created after the last election, self-heals within one
+`renewDeadline` instead of staying wrong until the next leadership change.
+
+Before mutating each drifted pod, `reconcileLeaderLabels()` re-confirms leadership via a
+`stillLeader` callback (`ElectorService#stillOwnsLock`, which calls `RedisLockRegistry.renewLock` —
+a Redis-side ownership check whose Lua script only succeeds while Redis still maps the key to this
+registry's client id, and which refreshes the lease as a side effect). This closes a TOCTOU: a
+reconcile that outlives the lease (very slow API, many drifted pods) must not keep stamping this
+pod's stale identity after another pod has already taken over the lock — that would flip the new
+leader's label back to `false` and leave the deployment momentarily leaderless. On a lost/unconfirmed
+ownership the reconcile halts immediately; labels then converge on the new leader's next reconcile.
+The check only fires for pods that actually need a patch, so a steady-state (all-labels-match)
+reconcile issues no extra Redis calls.
+
+### Kubernetes Client Request Bounds
+
+`K8sClientConfiguration` overrides two fabric8 defaults on the `KubernetesClient` bean:
+`requestTimeout` (10s → 2.5s) and `requestRetryBackoffLimit` (10 → 3). Every K8s API call runs
+inline on `ElectorService`'s single scheduler thread, so an unbounded call would (a) block the
+shutdown-time lock release past its 5s `RELEASE_TIMEOUT` window and (b) in the extreme stall lock
+renewal past the lease while a label reconcile is mid-flight. Bounding the per-call time keeps a whole
+reconcile of a handful of pods comfortably inside both windows. The config starts from
+`Config.autoConfigure(null)` (in-cluster service-account token, API server, CA, namespace) and edits
+only those two fields, so authentication is untouched.
 
 ### Thread Safety
 
-- `ElectorService` uses a single-threaded ScheduledExecutorService
-- Lock state is managed via volatile fields
+- `ElectorService`'s `TaskScheduler` bean is pinned to a single thread (`setPoolSize(1)` in
+  `TaskSchedulerConfiguration`) specifically because `DistributedLock.unlock()` is thread-owned
+  (`RedisLockRegistry.RedisLock` wraps a local `ReentrantLock` and throws `IllegalStateException` if
+  unlocked from a different thread than acquired it). Pinning to one thread keeps acquisition
+  (`lockLoop`) and renewal/release (`refreshLock`) on the same thread by construction.
+- Lock state is managed via volatile/atomic fields
 - Lock acquisition and renewal happen sequentially, never concurrently
 
 ### Graceful Shutdown
 
-- `@PreDestroy` annotation ensures lock release on pod termination
-- Scheduler waits up to 5 seconds for clean shutdown
+- `@PreDestroy` → `stop()` cancels the refresh task, then releases the lock
+- Since `stop()` itself runs on whatever thread Spring's context shutdown uses (not the scheduler
+  thread), it can't call `unlock()` directly — see Thread Safety above. Instead it submits the
+  release onto the scheduler (`taskScheduler.submit(...)`) and blocks on the returned `Future` for
+  up to 5 seconds (`ElectorService.RELEASE_TIMEOUT`) so the unlock happens on the correct thread
+  before the pod terminates
+- `TaskSchedulerConfiguration` sets `acceptTasksAfterContextClose(true)` on the scheduler bean. This
+  is required, not cosmetic: `ThreadPoolTaskScheduler` listens for `ContextClosedEvent` and, by
+  default, calls `executor.shutdown()` right there — and that event is published (synchronously)
+  *before* Spring invokes any `SmartLifecycle#stop()`. Without the flag, `stop()`'s `submit()` call
+  above would always throw `TaskRejectedException` and the lock would leak every graceful shutdown —
+  exactly the bug this scheduler thread-pinning exists to avoid
+- If this pod was leading, `stop()` also clears its own `leader=true` label (`callbacks.onShutdown()`)
+  after releasing the lock, so it doesn't sit labeled true for the rest of
+  `terminationGracePeriodSeconds`
 - Spring Boot graceful shutdown ensures in-flight operations complete
