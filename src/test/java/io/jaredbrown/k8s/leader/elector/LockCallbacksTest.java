@@ -228,6 +228,37 @@ class LockCallbacksTest {
         assertDoesNotThrow(() -> lockCallbacks.ensureSelfLabeled());
     }
 
+    @Test
+    void onShutdown_shouldSetSelfLabelToFalse() {
+        // Given
+        final PodResource selfPodResource = mock(PodResource.class);
+        when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(selfPodResource);
+
+        // When
+        lockCallbacks.onShutdown();
+
+        // Then: a departing leader must not stay labeled true through its termination grace period.
+        final ArgumentCaptor<Pod> patchCaptor = ArgumentCaptor.forClass(Pod.class);
+        verify(selfPodResource).patch(any(PatchContext.class), patchCaptor.capture());
+        assertEquals("false", patchCaptor
+                .getValue()
+                .getMetadata()
+                .getLabels()
+                .get(LABEL_KEY));
+    }
+
+    @Test
+    void onShutdown_shouldNotThrowWhenPatchFails() {
+        // Given
+        final PodResource selfPodResource = mock(PodResource.class);
+        when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(selfPodResource);
+        when(selfPodResource.patch(any(PatchContext.class), any(Pod.class)))
+                .thenThrow(new KubernetesClientException("API server unavailable"));
+
+        // When/Then
+        assertDoesNotThrow(() -> lockCallbacks.onShutdown());
+    }
+
     private static Pod pod(final String name) {
         return new PodBuilder()
                 .withNewMetadata()

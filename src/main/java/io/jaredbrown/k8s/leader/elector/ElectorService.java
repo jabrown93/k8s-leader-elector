@@ -101,7 +101,7 @@ public class ElectorService implements SmartLifecycle {
     private void awaitLockRelease() {
         try {
             taskScheduler
-                    .submit(this::releaseLockIfHeld)
+                    .submit(this::releaseLockAndClearLabelIfHeld)
                     .get(RELEASE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         } catch (final InterruptedException e) {
             Thread
@@ -113,9 +113,19 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
+    // Runs on the scheduler thread (see awaitLockRelease). Only a pod that was actually leading
+    // needs its label cleared here - a non-leader pod's label is already false.
+    private void releaseLockAndClearLabelIfHeld() {
+        if (releaseLockIfHeld()) {
+            callbacks.onShutdown();
+        }
+    }
+
     // --- Refresh logic: interval is configurable via electorProperties.getRenewDeadline() ---
 
-    private void releaseLockIfHeld() {
+    // Returns whether this pod was holding the lock (i.e. was leader), regardless of whether the
+    // unlock call itself succeeded.
+    private boolean releaseLockIfHeld() {
         final DistributedLock currentLock = lock.getAndSet(null);
         if (currentLock != null) {
             try {
@@ -124,7 +134,9 @@ public class ElectorService implements SmartLifecycle {
             } catch (final Exception e) {
                 log.error("Error while releasing lock", e);
             }
+            return true;
         }
+        return false;
     }
 
     private void lockLoop() {

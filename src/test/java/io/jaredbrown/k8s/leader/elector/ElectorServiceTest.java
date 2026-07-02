@@ -643,6 +643,8 @@ class ElectorServiceTest {
 
         // Then - should not throw exception
         verify(lock, never()).unlock();
+        // Never held the lock (never led), so there's no self-label to clear.
+        verify(callbacks, never()).onShutdown();
     }
 
     @Test
@@ -670,8 +672,10 @@ class ElectorServiceTest {
         // When
         electorService.stop();
 
-        // Then - should handle exception gracefully
+        // Then - should handle exception gracefully, and still clear the self-label since this pod
+        // was leading regardless of whether the underlying unlock call itself succeeded.
         verify(lock).unlock();
+        verify(callbacks).onShutdown();
     }
 
     @Test
@@ -700,6 +704,9 @@ class ElectorServiceTest {
         // Then
         verify(taskScheduler).submit(any(Runnable.class));
         verify(lock).unlock();
+        // This pod was leading, so its self-label must be cleared rather than left true for the
+        // rest of terminationGracePeriodSeconds.
+        verify(callbacks).onShutdown();
     }
 
     @Test

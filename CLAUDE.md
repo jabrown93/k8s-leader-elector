@@ -192,4 +192,13 @@ means a slow API server, or a pod created after the last election, self-heals wi
   release onto the scheduler (`taskScheduler.submit(...)`) and blocks on the returned `Future` for
   up to 5 seconds (`ElectorService.RELEASE_TIMEOUT`) so the unlock happens on the correct thread
   before the pod terminates
+- `TaskSchedulerConfiguration` sets `acceptTasksAfterContextClose(true)` on the scheduler bean. This
+  is required, not cosmetic: `ThreadPoolTaskScheduler` listens for `ContextClosedEvent` and, by
+  default, calls `executor.shutdown()` right there — and that event is published (synchronously)
+  *before* Spring invokes any `SmartLifecycle#stop()`. Without the flag, `stop()`'s `submit()` call
+  above would always throw `TaskRejectedException` and the lock would leak every graceful shutdown —
+  exactly the bug this scheduler thread-pinning exists to avoid
+- If this pod was leading, `stop()` also clears its own `leader=true` label (`callbacks.onShutdown()`)
+  after releasing the lock, so it doesn't sit labeled true for the rest of
+  `terminationGracePeriodSeconds`
 - Spring Boot graceful shutdown ensures in-flight operations complete

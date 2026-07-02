@@ -68,7 +68,7 @@ public class LockCallbacks {
             }
 
             if (updated > 0 || failures > 0) {
-                log.info("Reconciled leader labels: {} updated, {} failed ({} pods total, leader={})",
+                log.info("Reconciled leader labels: {} updated, {} failed ({} pods total, leaderPod={})",
                          updated,
                          failures,
                          pods.size(),
@@ -129,6 +129,16 @@ public class LockCallbacks {
 
     public void onLockLost() {
         log.warn("Lock lost - removing leader label from self");
+        updatePodLeaderLabel(kubernetesClient.getNamespace(), selfPodName, false);
+    }
+
+    // Called on graceful shutdown, but only for a pod that was actually leading (see
+    // ElectorService#releaseLockAndClearLabelIfHeld) — otherwise the label is already false. Without
+    // this, a departing leader would stay labeled true for the rest of its terminationGracePeriod,
+    // which anything selecting directly on the label (not just the Service, which drops NotReady
+    // endpoints immediately) could still match.
+    public void onShutdown() {
+        log.info("Shutting down while leading - removing leader label from self");
         updatePodLeaderLabel(kubernetesClient.getNamespace(), selfPodName, false);
     }
 }
