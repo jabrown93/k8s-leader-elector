@@ -1,7 +1,7 @@
 #syntax=docker/dockerfile:1
 
 # === Build stage: Install tini and prepare application ===
-FROM dhi.io/amazoncorretto:25.0.3-alpine3.22-dev AS builder
+FROM dhi.io/amazoncorretto:25.0.3-alpine3.24-dev AS builder
 
 # Install tini for proper signal handling and process management
 RUN apk add --no-cache tini
