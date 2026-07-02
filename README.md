@@ -5,7 +5,10 @@
 Tiny Kubernetes sidecar binary that:
 
 - Acquires leadership using a Redis distributed lock (Spring Integration `RedisLockRegistry`)
-- On gaining leadership, patches its own Pod with a label (default: `dns.jb.io/leader=true`)
+- On gaining leadership, patches its own Pod with a label (default: `dns.jb.io/leader=true`) and
+  every other matching pod with `=false`
+- Re-reconciles that labeling on every lock renewal (not just on acquisition), so a pod created or
+  missed after the last election catches up within one `ELECTOR_RENEW_DEADLINE`
 - On losing leadership, removes the label
 
 ## Configuration

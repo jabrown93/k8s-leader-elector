@@ -3,7 +3,6 @@ package io.jaredbrown.k8s.leader.configuration;
 import jakarta.annotation.Nonnull;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.time.Clock;
@@ -12,9 +11,13 @@ import java.time.Clock;
 public class TaskSchedulerConfiguration {
     @Nonnull
     @Bean
-    public TaskScheduler taskScheduler() {
+    public ThreadPoolTaskScheduler taskScheduler() {
         final ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(2);
+        // DistributedLock.unlock() is thread-owned (see ElectorService#awaitLockRelease): a pool
+        // size above 1 lets lock acquisition (lockLoop) and renewal/release (refreshLock) run on
+        // different worker threads, which throws IllegalStateException off the acquiring thread. A
+        // single thread keeps every lock operation sequential and on the same thread by construction.
+        scheduler.setPoolSize(1);
         scheduler.setThreadNamePrefix("elector-");
         scheduler.setDaemon(true);
         scheduler.initialize();

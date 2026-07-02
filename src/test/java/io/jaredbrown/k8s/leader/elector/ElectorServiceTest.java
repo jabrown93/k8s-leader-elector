@@ -8,13 +8,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.integration.redis.util.RedisLockRegistry;
 import org.springframework.integration.support.locks.DistributedLock;
-import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -45,7 +46,7 @@ class ElectorServiceTest {
     private RedisLockRegistry lockRegistry;
 
     @Mock
-    private TaskScheduler taskScheduler;
+    private ThreadPoolTaskScheduler taskScheduler;
 
     @Mock
     private DistributedLock lock;
@@ -87,6 +88,19 @@ class ElectorServiceTest {
         lenient()
                 .when(electorProperties.getHealthProbeUnhealthyBackoff())
                 .thenReturn(Duration.ofSeconds(30));
+
+        // stop()/awaitLockRelease() submits the release onto taskScheduler and waits for it (the
+        // real ThreadPoolTaskScheduler runs it there); the mock doesn't run anything by default, so
+        // stub submit() to invoke the given task synchronously, matching real behavior closely
+        // enough for these tests.
+        lenient()
+                .when(taskScheduler.submit(any(Runnable.class)))
+                .thenAnswer(invocation -> {
+                    invocation
+                            .<Runnable>getArgument(0)
+                            .run();
+                    return CompletableFuture.completedFuture(null);
+                });
     }
 
     @Test
@@ -97,6 +111,8 @@ class ElectorServiceTest {
         // Then
         assertTrue(electorService.isRunning());
         verify(taskScheduler).schedule(any(Runnable.class), any(Instant.class));
+        // Every pod carries the label from boot, before it has contested any election.
+        verify(callbacks).ensureSelfLabeled();
     }
 
     @Test
@@ -265,12 +281,50 @@ class ElectorServiceTest {
 
         // Then
         verify(lockRegistry).renewLock("test-lock", Duration.ofSeconds(120));
+        // Self-heals any label a prior attempt failed to set, every renewal tick.
+        verify(callbacks).reconcileLeaderLabels();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void refreshLock_shouldRetryOnceThenSucceedOnTransientRenewFailure() throws Exception {
+        // Given: the first renew attempt throws, the second (immediate retry) succeeds.
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
+        doThrow(new RuntimeException("Redis blip"))
+                .doNothing()
+                .when(lockRegistry)
+                .renewLock(anyString(), any(Duration.class));
+
+        electorService.start();
+
+        final ArgumentCaptor<Runnable> lockLoopCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(lockLoopCaptor.capture(), any(Instant.class));
+        lockLoopCaptor
+                .getValue()
+                .run();
+
+        final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
+
+        // When
+        refreshCaptor
+                .getValue()
+                .run();
+
+        // Then: a single transient failure does not cost leadership — it's absorbed by the retry.
+        verify(lockRegistry, times(2)).renewLock("test-lock", Duration.ofSeconds(120));
+        verify(callbacks, never()).onLockLost();
+        verify(callbacks).reconcileLeaderLabels();
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void refreshLock_shouldHandleLockLostOnRenewFailure() throws Exception {
-        // Given
+        // Given: both the initial renew attempt AND its immediate retry fail.
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
         when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
@@ -298,7 +352,8 @@ class ElectorServiceTest {
                 .getValue()
                 .run();
 
-        // Then
+        // Then: the retry was attempted (two calls total) before giving up leadership.
+        verify(lockRegistry, times(2)).renewLock("test-lock", Duration.ofSeconds(120));
         verify(callbacks).onLockLost();
         verify(scheduledFuture).cancel(true);
         verify(lock).unlock();
@@ -525,6 +580,7 @@ class ElectorServiceTest {
         // Then: a single failure below the threshold keeps the lock (renews, does not relinquish)
         verify(lockRegistry).renewLock("test-lock", Duration.ofSeconds(120));
         verify(callbacks, never()).onLockLost();
+        verify(callbacks).reconcileLeaderLabels();
     }
 
     @Test
@@ -616,6 +672,47 @@ class ElectorServiceTest {
 
         // Then - should handle exception gracefully
         verify(lock).unlock();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void stop_shouldReleaseLockViaSchedulerThreadNotCallingThread() throws Exception {
+        // DistributedLock.unlock() is thread-owned (RedisLockRegistry.RedisLock wraps a local
+        // ReentrantLock); calling it directly from stop()'s caller thread would throw
+        // IllegalStateException against a real lock. stop() must route the release through the
+        // taskScheduler instead of calling releaseLockIfHeld() inline.
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
+
+        electorService.start();
+        final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
+        runnableCaptor
+                .getValue()
+                .run();
+
+        // When
+        electorService.stop();
+
+        // Then
+        verify(taskScheduler).submit(any(Runnable.class));
+        verify(lock).unlock();
+    }
+
+    @Test
+    void stop_shouldNotThrowWhenReleaseTimesOut() {
+        // Given: the scheduler never runs the submitted release task (simulating a wedged/backed-up
+        // scheduler thread) — submit() returns a Future that never completes.
+        when(taskScheduler.submit(any(Runnable.class))).thenReturn(new CompletableFuture<>());
+
+        // When/Then: stop() must not throw or hang the caller past the bounded wait.
+        electorService.start();
+        electorService.stop();
+
+        assertFalse(electorService.isRunning());
     }
 
     // A hand-advanceable clock so deadlock-grace timing can be tested deterministically.
