@@ -229,7 +229,7 @@ public class ElectorService implements SmartLifecycle {
         lock.set(newLock);
         log.info("Lock '{}' acquired", electorProperties.getLockName());
         try {
-            callbacks.onLockAcquired();
+            callbacks.onLockAcquired(this::stillOwnsLock);
         } catch (final Exception e) {
             log.error("Lock acquired, but post-acquire callback failed; releasing lock and retrying in {}",
                       electorProperties.getRetryPeriod(),
@@ -316,7 +316,9 @@ public class ElectorService implements SmartLifecycle {
             renewLockWithRetry();
             // Self-heals any label a prior attempt failed to set (slow API server, a pod created
             // after the last election) instead of leaving it wrong until the next leadership change.
-            callbacks.reconcileLeaderLabels();
+            // Passes stillOwnsLock so a reconcile that outlives the lease stops before stamping stale
+            // labels once another pod has taken over.
+            callbacks.reconcileLeaderLabels(this::stillOwnsLock);
         } catch (final Exception e) {
             log.error("Error while refreshing lock, treating as lock lost", e);
             handleLockLost();
@@ -343,6 +345,28 @@ public class ElectorService implements SmartLifecycle {
                   electorProperties
                           .getLeaseDuration()
                           .get(ChronoUnit.SECONDS));
+    }
+
+    // Re-confirms this pod still holds the Redis lock, and refreshes its lease as a side effect.
+    // Passed into LockCallbacks#reconcileLeaderLabels so a long-running label reconcile stops the
+    // moment ownership is lost instead of stamping stale labels. renewLock's Lua script only extends
+    // the key while Redis still maps it to THIS registry's client id, so a thrown/false result is a
+    // genuine "no longer the owner" signal (a lapsed lease another pod already took), not just local
+    // state — a purely local check can't see a Redis-side takeover. Runs on the scheduler thread, the
+    // same thread as the reconcile that calls it.
+    boolean stillOwnsLock() {
+        if (lock.get() == null) {
+            return false;
+        }
+        try {
+            lockRegistry.renewLock(electorProperties.getLockName(), electorProperties.getLeaseDuration());
+            return true;
+        } catch (final Exception e) {
+            log.warn("Could not confirm Redis ownership of lock '{}' mid-reconcile; treating as lost",
+                     electorProperties.getLockName(),
+                     e);
+            return false;
+        }
     }
 
     private void handleLockLost() {

@@ -18,8 +18,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -92,7 +94,7 @@ class LockCallbacksTest {
         when(namespacedPods.withName("pod-2")).thenReturn(followerPodResource);
 
         // When
-        lockCallbacks.onLockAcquired();
+        lockCallbacks.onLockAcquired(() -> true);
 
         // Then
         verify(namespacedPods).withLabel("app", APP_NAME);
@@ -131,7 +133,7 @@ class LockCallbacksTest {
         when(podList.getItems()).thenReturn(List.of(leaderPod, followerPod));
 
         // When
-        lockCallbacks.reconcileLeaderLabels();
+        lockCallbacks.reconcileLeaderLabels(() -> true);
 
         // Then: idempotent — no pod needed a patch, so none was attempted.
         verify(namespacedPods, never()).withName(any(String.class));
@@ -150,11 +152,79 @@ class LockCallbacksTest {
         when(namespacedPods.withName("pod-2")).thenReturn(peerPodResource);
 
         // When
-        lockCallbacks.reconcileLeaderLabels();
+        lockCallbacks.reconcileLeaderLabels(() -> true);
 
         // Then
         verify(namespacedPods, never()).withName(SELF_POD_NAME);
         verify(peerPodResource).patch(any(PatchContext.class), any(Pod.class));
+    }
+
+    @Test
+    void reconcileLeaderLabels_shouldNotPatchAnyPodWhenOwnershipAlreadyLost() {
+        // Given: two pods have drifted labels, but this pod has already lost leadership.
+        final Pod leaderPod = podWithLabel(SELF_POD_NAME, "false"); // drifted: should be true if leader
+        final Pod peerPod = podWithLabel("pod-2", "true");          // drifted: should be false
+
+        when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
+        when(labeledPods.list()).thenReturn(podList);
+        when(podList.getItems()).thenReturn(List.of(leaderPod, peerPod));
+
+        // When: the ownership recheck fails before the first mutation.
+        lockCallbacks.reconcileLeaderLabels(() -> false);
+
+        // Then: not a single pod was patched — no stamping stale labels after another pod took over.
+        verify(namespacedPods, never()).withName(any(String.class));
+    }
+
+    @Test
+    void reconcileLeaderLabels_shouldRecheckOwnershipBeforeEachDriftedPod() {
+        // Given: two drifted pods that both need a patch.
+        final PodResource leaderPodResource = mock(PodResource.class);
+        final PodResource peerPodResource = mock(PodResource.class);
+        final Pod leaderPod = podWithLabel(SELF_POD_NAME, "false");
+        final Pod peerPod = podWithLabel("pod-2", "true");
+
+        when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
+        when(labeledPods.list()).thenReturn(podList);
+        when(podList.getItems()).thenReturn(List.of(leaderPod, peerPod));
+        when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(leaderPodResource);
+        when(namespacedPods.withName("pod-2")).thenReturn(peerPodResource);
+
+        final AtomicInteger checks = new AtomicInteger();
+
+        // When
+        lockCallbacks.reconcileLeaderLabels(() -> {
+            checks.incrementAndGet();
+            return true;
+        });
+
+        // Then: ownership was re-confirmed once per pod actually mutated, and both were patched.
+        assertEquals(2, checks.get());
+        verify(leaderPodResource).patch(any(PatchContext.class), any(Pod.class));
+        verify(peerPodResource).patch(any(PatchContext.class), any(Pod.class));
+    }
+
+    @Test
+    void reconcileLeaderLabels_shouldStopPatchingOnceOwnershipLostMidReconcile() {
+        // Given: first drifted pod is patched while still leader; ownership is lost before the second.
+        final PodResource leaderPodResource = mock(PodResource.class);
+        final Pod leaderPod = podWithLabel(SELF_POD_NAME, "false");
+        final Pod peerPod = podWithLabel("pod-2", "true");
+
+        when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
+        when(labeledPods.list()).thenReturn(podList);
+        when(podList.getItems()).thenReturn(List.of(leaderPod, peerPod));
+        when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(leaderPodResource);
+
+        final Iterator<Boolean> ownership = List.of(true, false).iterator();
+
+        // When
+        lockCallbacks.reconcileLeaderLabels(ownership::next);
+
+        // Then: the first pod was patched, but the reconcile halted before touching the second — it
+        // never even resolved pod-2's resource.
+        verify(leaderPodResource).patch(any(PatchContext.class), any(Pod.class));
+        verify(namespacedPods, never()).withName("pod-2");
     }
 
     @Test
@@ -165,7 +235,7 @@ class LockCallbacksTest {
 
         // When/Then: a transient API failure must not cost leadership; the next renewal-tick
         // reconcile (ElectorService#refreshLock) retries automatically.
-        assertDoesNotThrow(() -> lockCallbacks.reconcileLeaderLabels());
+        assertDoesNotThrow(() -> lockCallbacks.reconcileLeaderLabels(() -> true));
     }
 
     @Test
@@ -193,7 +263,7 @@ class LockCallbacksTest {
                 .thenThrow(new KubernetesClientException("immutable spec update"));
 
         // When/Then: keep the lock; the next renewal-tick reconcile retries the self-label patch.
-        assertDoesNotThrow(() -> lockCallbacks.reconcileLeaderLabels());
+        assertDoesNotThrow(() -> lockCallbacks.reconcileLeaderLabels(() -> true));
         verify(leaderPodResource).patch(any(PatchContext.class), any(Pod.class));
     }
 

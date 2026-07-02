@@ -174,6 +174,28 @@ query failure is likewise logged and retried on the next reconcile rather than e
 means a slow API server, or a pod created after the last election, self-heals within one
 `renewDeadline` instead of staying wrong until the next leadership change.
 
+Before mutating each drifted pod, `reconcileLeaderLabels()` re-confirms leadership via a
+`stillLeader` callback (`ElectorService#stillOwnsLock`, which calls `RedisLockRegistry.renewLock` —
+a Redis-side ownership check whose Lua script only succeeds while Redis still maps the key to this
+registry's client id, and which refreshes the lease as a side effect). This closes a TOCTOU: a
+reconcile that outlives the lease (very slow API, many drifted pods) must not keep stamping this
+pod's stale identity after another pod has already taken over the lock — that would flip the new
+leader's label back to `false` and leave the deployment momentarily leaderless. On a lost/unconfirmed
+ownership the reconcile halts immediately; labels then converge on the new leader's next reconcile.
+The check only fires for pods that actually need a patch, so a steady-state (all-labels-match)
+reconcile issues no extra Redis calls.
+
+### Kubernetes Client Request Bounds
+
+`K8sClientConfiguration` overrides two fabric8 defaults on the `KubernetesClient` bean:
+`requestTimeout` (10s → 2.5s) and `requestRetryBackoffLimit` (10 → 3). Every K8s API call runs
+inline on `ElectorService`'s single scheduler thread, so an unbounded call would (a) block the
+shutdown-time lock release past its 5s `RELEASE_TIMEOUT` window and (b) in the extreme stall lock
+renewal past the lease while a label reconcile is mid-flight. Bounding the per-call time keeps a whole
+reconcile of a handful of pods comfortably inside both windows. The config starts from
+`Config.autoConfigure(null)` (in-cluster service-account token, API server, CA, namespace) and edits
+only those two fields, so authentication is untouched.
+
 ### Thread Safety
 
 - `ElectorService`'s `TaskScheduler` bean is pinned to a single thread (`setPoolSize(1)` in

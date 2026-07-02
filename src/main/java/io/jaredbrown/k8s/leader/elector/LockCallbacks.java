@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 @Slf4j
 @Component
@@ -27,9 +28,9 @@ public class LockCallbacks {
     @Value("${POD_NAME:unknown}")
     private String selfPodName;
 
-    public void onLockAcquired() {
+    public void onLockAcquired(final BooleanSupplier stillLeader) {
         log.info("Lock acquired - reconciling leader labels across deployment");
-        reconcileLeaderLabels();
+        reconcileLeaderLabels(stillLeader);
     }
 
     // Brings every pod's leader label in line with the current election result: true on self,
@@ -39,7 +40,13 @@ public class LockCallbacks {
     // election) instead of leaving it wrong until the next leadership change. Never throws: a
     // labeling problem is a side effect of leadership, not a reason to give it up, and the next
     // renewal tick (at most renewDeadline away) retries automatically.
-    public void reconcileLeaderLabels() {
+    //
+    // stillLeader re-confirms leadership (Redis-side; see ElectorService#stillOwnsLock) immediately
+    // before mutating each drifted pod. A reconcile that outlives the lease — a very slow API server
+    // or many drifted pods — must not keep stamping this pod's stale identity after another pod has
+    // taken over the lock, which would flip the new leader's label back to false and leave the
+    // deployment momentarily leaderless until the new leader's next reconcile.
+    public void reconcileLeaderLabels(final BooleanSupplier stillLeader) {
         final String namespace = kubernetesClient.getNamespace();
         try {
             final List<Pod> pods = kubernetesClient
@@ -59,6 +66,11 @@ public class LockCallbacks {
 
                 if (!needsLabelUpdate(pod, isLeader)) {
                     continue;
+                }
+                if (!stillLeader.getAsBoolean()) {
+                    log.warn("Halting leader-label reconcile: leadership no longer confirmed " +
+                             "(was leaderPod={}, {} pods updated before ownership was lost)", selfPodName, updated);
+                    return;
                 }
                 if (updatePodLeaderLabel(namespace, podName, isLeader)) {
                     updated++;
