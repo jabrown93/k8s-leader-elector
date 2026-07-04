@@ -1,5 +1,11 @@
 # leader-elector
 
+[![CI](https://img.shields.io/github/actions/workflow/status/jabrown93/k8s-leader-elector/ci.yml?label=CI)](https://github.com/jabrown93/k8s-leader-elector/actions/workflows/ci.yml)
+[![CodeQL](https://img.shields.io/github/actions/workflow/status/jabrown93/k8s-leader-elector/codeql.yml?label=CodeQL)](https://github.com/jabrown93/k8s-leader-elector/actions/workflows/codeql.yml)
+[![Version](https://img.shields.io/github/v/tag/jabrown93/k8s-leader-elector?sort=semver&label=version)](https://github.com/jabrown93/k8s-leader-elector/tags)
+[![Issues](https://img.shields.io/github/issues/jabrown93/k8s-leader-elector)](https://github.com/jabrown93/k8s-leader-elector/issues)
+[![License](https://img.shields.io/github/license/jabrown93/k8s-leader-elector)](LICENSE)
+
 **Under development, bugs are likely and I will be slow to address them for the foreseeable future**
 
 Tiny Kubernetes sidecar binary that:
