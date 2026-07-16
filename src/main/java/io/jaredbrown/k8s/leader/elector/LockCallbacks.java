@@ -7,10 +7,12 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.base.PatchContext;
 import io.fabric8.kubernetes.client.dsl.base.PatchType;
 import jakarta.annotation.Nonnull;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -31,6 +33,17 @@ public class LockCallbacks {
     // holds the Redis lock.
     @Value("${POD_NAME}")
     private String selfPodName;
+
+    // @Value above only rejects a totally absent property; POD_NAME="" resolves successfully and
+    // would silently reproduce the same bug removing the "unknown" default was meant to fix - every
+    // pod.getMetadata().getName().equals(selfPodName) comparison below would fail, so this pod would
+    // never match "isLeader" even while holding the Redis lock. Fail startup on blank too.
+    @PostConstruct
+    void validateSelfPodName() {
+        if (!StringUtils.hasText(selfPodName)) {
+            throw new IllegalStateException("POD_NAME must not be blank");
+        }
+    }
 
     public void onLockAcquired(final BooleanSupplier stillLeader) {
         log.info("Lock acquired - reconciling leader labels across deployment");

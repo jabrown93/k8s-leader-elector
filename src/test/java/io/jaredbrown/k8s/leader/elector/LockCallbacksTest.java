@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -77,6 +78,25 @@ class LockCallbacksTest {
         lenient()
                 .when(podsOperation.inNamespace(NAMESPACE))
                 .thenReturn(namespacedPods);
+    }
+
+    @Test
+    void validateSelfPodName_shouldRejectBlankValue() {
+        ReflectionTestUtils.setField(lockCallbacks, "selfPodName", "   ");
+
+        assertThrows(IllegalStateException.class, () -> lockCallbacks.validateSelfPodName());
+    }
+
+    @Test
+    void validateSelfPodName_shouldRejectEmptyValue() {
+        ReflectionTestUtils.setField(lockCallbacks, "selfPodName", "");
+
+        assertThrows(IllegalStateException.class, () -> lockCallbacks.validateSelfPodName());
+    }
+
+    @Test
+    void validateSelfPodName_shouldAcceptNonBlankValue() {
+        assertDoesNotThrow(() -> lockCallbacks.validateSelfPodName());
     }
 
     @Test
