@@ -5,6 +5,17 @@ on:
     tags:
     - 'v*.*.*'
 
+# semantic-release can tag two close-together prereleases (or a prerelease
+# and a stable release) faster than a multi-platform build+push completes.
+# Without this, their release-image runs race, and whichever finishes last
+# wins the shared floating tag (:beta or :latest) - possibly the OLDER
+# version, silently rolling back anyone pulling the floating tag. A single
+# global group serializes all release-image runs so the floating tag always
+# ends up on the most recently built image.
+concurrency:
+  group: release-image
+  cancel-in-progress: false
+
 jobs:
   release-image:
     runs-on: ubuntu-latest

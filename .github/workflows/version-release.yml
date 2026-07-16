@@ -21,6 +21,16 @@ jobs:
         fetch-depth: 0
         token: ${{ secrets.GH_TOKEN }}
 
+    # Captured as early as possible, before the slow steps below (npm ci,
+    # semantic-release's own GitHub API calls) run, so the later
+    # --force-with-lease reflects beta's tip as of "job start", not "right
+    # before we push" - the whole job takes long enough for a concurrent
+    # beta merge to land and be missed by a lease captured any later.
+    - name: Capture beta tip before release
+      if: github.ref_name == 'main'
+      id: beta_before
+      run: echo "sha=$(git ls-remote origin refs/heads/beta | cut -f1)" >> "$GITHUB_OUTPUT"
+
     - name: Set up Node
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
@@ -59,16 +69,15 @@ jobs:
     # release as beta's baseline via a squash-merged resync PR - it would
     # keep computing beta's next prerelease from the old, now-superseded
     # prerelease baseline. Resetting beta to main's exact tip is the only
-    # ancestry-correct fix. --force-with-lease is pinned to a SHA fetched
-    # immediately beforehand: if beta moved in between (e.g. a feature PR
-    # merged mid-release), the push aborts instead of silently discarding
-    # that commit.
-    # actions/checkout persisted secrets.GH_TOKEN as the origin credential
-    # above, so this push (to a different ref than was checked out) reuses
-    # it without needing to set it again here.
+    # ancestry-correct fix. --force-with-lease is pinned to the SHA captured
+    # in "Capture beta tip before release", at the start of this job - not
+    # re-fetched here - so a beta merge landing anywhere during this job's
+    # run (checkout, npm ci, the semantic-release run itself) aborts the
+    # push instead of being silently discarded. actions/checkout persisted
+    # secrets.GH_TOKEN as the origin credential above, so this push (to a
+    # different ref than was checked out) reuses it without needing to set
+    # it again here.
     - name: Resync beta to main after a stable release
       if: steps.release.outputs.published == 'true' && github.ref_name == 'main'
       run: |
-        git fetch origin beta
-        beta_sha=$(git rev-parse refs/remotes/origin/beta)
-        git push origin "HEAD:refs/heads/beta" --force-with-lease="refs/heads/beta:${beta_sha}"
+        git push origin "HEAD:refs/heads/beta" --force-with-lease="refs/heads/beta:${{ steps.beta_before.outputs.sha }}"
