@@ -88,6 +88,17 @@ class HealthProbeTest {
     }
 
     @Test
+    void isHealthy_returnsFalseWhenReadThrows() throws IOException {
+        // A directory passes the isReadable() and freshness checks but Files.readString() throws
+        // IOException on it, exercising the catch block that reports unhealthy rather than
+        // propagating (e.g. the status file is deleted or replaced by a directory mid-read).
+        final Path directory = Files.createDirectory(tempDir.resolve("not-a-file"));
+        enabled(directory, Duration.ZERO);
+
+        assertFalse(new HealthProbe(electorProperties).isHealthy());
+    }
+
+    @Test
     void isHealthy_returnsFalseWhenPathUnset() {
         when(electorProperties.isHealthProbeEnabled()).thenReturn(true);
         lenient()

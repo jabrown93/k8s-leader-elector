@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -30,9 +31,11 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -755,6 +758,74 @@ class ElectorServiceTest {
         electorService.stop();
 
         assertFalse(electorService.isRunning());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void stop_shouldHandleInterruptedExceptionWhileAwaitingRelease() throws Exception {
+        // Given: the caller thread is interrupted while blocked on the release Future's get().
+        final Future<Object> releaseFuture = mock(Future.class);
+        when(taskScheduler.submit(any(Runnable.class))).thenReturn((Future) releaseFuture);
+        when(releaseFuture.get(anyLong(), any(TimeUnit.class))).thenThrow(new InterruptedException("Test interruption"));
+
+        // When/Then: stop() must not throw or propagate the exception, but must restore the
+        // interrupt flag it consumed rather than swallowing it silently.
+        electorService.start();
+        electorService.stop();
+
+        assertFalse(electorService.isRunning());
+        assertTrue(Thread.interrupted());
+    }
+
+    @Test
+    void lockLoop_shouldNoOpWhenServiceAlreadyStopped() {
+        // Given: a lockLoop tick was already queued on the scheduler before stop() ran (a normal
+        // race between the last scheduled retry and shutdown).
+        electorService.start();
+        final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
+        electorService.stop();
+
+        // When: the already-queued tick fires anyway.
+        runnableCaptor
+                .getValue()
+                .run();
+
+        // Then: it returns immediately without attempting to acquire the lock.
+        verifyNoInteractions(lockRegistry);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void refreshLock_shouldTreatAsLockLostWhenServiceAlreadyStopped() throws Exception {
+        // Given: leadership acquired and a refresh tick already queued before stop() ran.
+        when(lockRegistry.obtain("test-lock")).thenReturn(lock);
+        when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
+        when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
+                                               any(Instant.class),
+                                               any(Duration.class))).thenReturn((ScheduledFuture) scheduledFuture);
+
+        electorService.start();
+        final ArgumentCaptor<Runnable> lockLoopCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(lockLoopCaptor.capture(), any(Instant.class));
+        lockLoopCaptor
+                .getValue()
+                .run();
+
+        final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
+
+        electorService.stop();
+
+        // When: the already-queued refresh tick fires anyway.
+        refreshCaptor
+                .getValue()
+                .run();
+
+        // Then: treated as lock lost rather than attempting a renew against a stopped service, and
+        // no re-acquire is scheduled since running is false.
+        verify(lockRegistry, never()).renewLock(anyString(), any(Duration.class));
+        verify(callbacks).onLockLost();
     }
 
     // A hand-advanceable clock so deadlock-grace timing can be tested deterministically.
