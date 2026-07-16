@@ -31,8 +31,15 @@ public class LockCallbacks {
     // must fail context startup rather than silently compare every real pod name against a
     // placeholder that never matches, which would mislabel this pod as a follower even while it
     // holds the Redis lock.
-    @Value("${POD_NAME}")
-    private String selfPodName;
+@Value("${POD_NAME}")
+private String selfPodName;
+
+@jakarta.annotation.PostConstruct
+void validateSelfPodName() {
+    if (selfPodName == null || selfPodName.isBlank()) {
+        throw new IllegalStateException("POD_NAME must be set and non-blank");
+    }
+}
 
     // @Value above only rejects a totally absent property; POD_NAME="" resolves successfully and
     // would silently reproduce the same bug removing the "unknown" default was meant to fix - every
