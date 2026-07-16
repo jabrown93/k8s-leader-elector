@@ -24,6 +24,10 @@
         <cyclonedx-maven-plugin.version>2.9.2</cyclonedx-maven-plugin.version>
         <spring-cloud-dependencies.version>2025.1.2</spring-cloud-dependencies.version>
         <log4j-bom.version>2.26.1</log4j-bom.version>
+        <!-- Matches the kubernetes-client version resolved transitively via
+             spring-cloud-starter-kubernetes-client-all, so the mock server speaks the same
+             API version as the real client used in production. -->
+        <fabric8-kubernetes-client.version>7.4.1</fabric8-kubernetes-client.version>
     </properties>
 
     <dependencies>
@@ -79,6 +83,17 @@
             <artifactId>mockito-core</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-server-mock</artifactId>
+            <version>${fabric8-kubernetes-client.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <dependencyManagement>
@@ -122,6 +137,21 @@
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
+            </plugin>
+            <!-- Runs *IT.java classes (real Redis + mock Kubernetes API server) during the
+                 integration-test/verify phases, separately from the fast unit tests surefire runs
+                 during `test`. CI's `mvn -B verify` already covers both; no workflow change needed. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <!-- CycloneDX SBOM generation. No <executions>, so it does not bind
                  to the build lifecycle (CI `mvn verify` and the release build are
