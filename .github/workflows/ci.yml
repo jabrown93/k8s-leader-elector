@@ -1,13 +1,15 @@
 name: CI
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ main, beta ]
   push:
-    # main = post-merge run. renovate/** lets Renovate's branch-automerge updates
-    # (which never open a PR) run `test` on the branch, so the default-branch
-    # ruleset (required `test` check, pull_request rule dropped) can fast-forward
-    # main once the branch is green.
-    branches: [ main, 'renovate/**' ]
+    # main/beta = post-merge run, including the semantic-release bot's own
+    # release commit (which carries [skip ci] so this doesn't loop). renovate/**
+    # lets Renovate's branch-automerge updates (which never open a PR) run
+    # `test` on the branch, so the default-branch ruleset (required `test`
+    # check, pull_request rule dropped) can fast-forward main once the branch
+    # is green.
+    branches: [ main, beta, 'renovate/**' ]
 
 jobs:
   test:
