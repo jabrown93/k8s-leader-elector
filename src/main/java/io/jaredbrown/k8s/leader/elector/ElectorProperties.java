@@ -4,6 +4,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -26,12 +27,15 @@ public class ElectorProperties {
     private String selectorLabelValue;
 
     @NotNull
+    @DurationMin(seconds = 1, message = "elector.leaseDuration must be at least 1s")
     private Duration leaseDuration = Duration.ofSeconds(120);
 
     @NotNull
+    @DurationMin(seconds = 1, message = "elector.renewDeadline must be at least 1s")
     private Duration renewDeadline = Duration.ofSeconds(60);
 
     @NotNull
+    @DurationMin(seconds = 1, message = "elector.retryPeriod must be at least 1s")
     private Duration retryPeriod = Duration.ofSeconds(5);
 
     // --- Optional health probe ---------------------------------------------------------------
@@ -64,8 +68,12 @@ public class ElectorProperties {
 
     // If the lock is free but no pod is healthy, leadership would deadlock forever (e.g. a fresh
     // install or an all-pods-wiped state). After the lock has been observed acquirable-but-this-
-    // pod-unhealthy for this long, acquire it anyway and lead in a degraded state.
+    // pod-unhealthy for this long, acquire it anyway and lead in a degraded state. Zero is a valid,
+    // deliberate value (skip the grace window and break the deadlock immediately); only negative
+    // values - which would silently behave identically to zero - are rejected as almost certainly
+    // a typo.
     @NotNull
+    @DurationMin(seconds = 0, message = "elector.healthProbeDeadlockGrace must not be negative")
     private Duration healthProbeDeadlockGrace = Duration.ofMinutes(5);
 
     // How long an UNHEALTHY pod backs off before re-probing for leadership, instead of the tight
@@ -76,5 +84,6 @@ public class ElectorProperties {
     // Should comfortably exceed retryPeriod; well under healthProbeDeadlockGrace so the all-unhealthy
     // escape hatch still fires on time (the unhealthy pod still re-probes ~grace/backoff times).
     @NotNull
+    @DurationMin(seconds = 1, message = "elector.healthProbeUnhealthyBackoff must be at least 1s")
     private Duration healthProbeUnhealthyBackoff = Duration.ofSeconds(30);
 }

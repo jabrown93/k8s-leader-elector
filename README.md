@@ -200,7 +200,17 @@ All properties bind via Spring relaxed rules, so `elector.labelKey` can be set a
 | `ELECTOR_RENEW_DEADLINE` | `60s` | How often the lock (and leader labels) are renewed |
 | `ELECTOR_RETRY_PERIOD` | `5s` | Acquire retry interval when not holding the lock |
 | `SPRING_DATA_REDIS_HOST` | `localhost` | Redis host backing the lock |
-| `POD_NAME` | — | This pod's name, injected via the downward API |
+| `POD_NAME` | — | This pod's name (downward API). **Required, no default** — the app fails to start without it, since a missing/wrong value would silently prevent the leader label from ever being applied to any pod. |
+
+### Securing Redis
+
+Leadership is only as trustworthy as the Redis instance backing it: the lock is a compare-and-swap
+Lua script keyed on a per-instance client ID, but that guarantee only holds against other clients
+speaking the same protocol. Anything that can reach this Redis instance and issue a raw `SET` on
+the lock key can forge or steal "leadership" outright, bypassing the CAS entirely. Run this against
+a Redis instance that untrusted workloads cannot reach, and configure auth/TLS
+(`spring.data.redis.password`, `spring.data.redis.ssl.enabled`, etc.) as appropriate for your
+environment — neither is enabled by default.
 
 ### Health-gated leadership
 
@@ -234,3 +244,10 @@ Released images (`ghcr.io/jabrown93/k8s-leader-elector`) are built for `linux/am
 - A CycloneDX SBOM and max-mode build provenance attached as OCI referrers
 - A keyless cosign signature over the pushed digest, so image-verification policies (e.g. Kyverno)
   can validate it
+
+## Releasing
+
+Versions and releases are automated from [Conventional Commits](https://www.conventionalcommits.org/)
+via [semantic-release](https://semantic-release.gitbook.io/) — no manual tagging. `main` publishes
+stable releases (`vX.Y.Z`); `beta` publishes prereleases (`vX.Y.Z-beta.N`). See the "Releasing"
+section in [CLAUDE.md](CLAUDE.md) for the full model and the `beta` → `main` promotion procedure.

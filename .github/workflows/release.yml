@@ -5,6 +5,17 @@ on:
     tags:
     - 'v*.*.*'
 
+# semantic-release can tag two close-together prereleases (or a prerelease
+# and a stable release) faster than a multi-platform build+push completes.
+# Without this, their release-image runs race, and whichever finishes last
+# wins the shared floating tag (:beta or :latest) - possibly the OLDER
+# version, silently rolling back anyone pulling the floating tag. A single
+# global group serializes all release-image runs so the floating tag always
+# ends up on the most recently built image.
+concurrency:
+  group: release-image
+  cancel-in-progress: false
+
 jobs:
   release-image:
     runs-on: ubuntu-latest
@@ -17,7 +28,7 @@ jobs:
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
     - name: Set up JDK 25
-      uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+      uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
       with:
         distribution: corretto
         java-version: '25'
@@ -48,9 +59,26 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-    - name: Extract tag
+    # main -> stable tag (no `-`): version + floating `latest`. beta ->
+    # prerelease tag (e.g. v1.2.0-beta.1): version + floating `beta`.
+    # `latest` only ever moves on a stable release.
+    - name: Extract tag and compute image tags
       id: vars
-      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      env:
+        IMAGE: ghcr.io/${{ github.repository_owner }}/k8s-leader-elector
+      run: |
+        VERSION="${GITHUB_REF#refs/tags/}"
+        echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+        FLOATING="latest"
+        if [[ "${VERSION}" == *-* ]]; then
+          FLOATING="beta"
+        fi
+        {
+          echo "tags<<EOF"
+          echo "${IMAGE}:${VERSION}"
+          echo "${IMAGE}:${FLOATING}"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Run maven install
       run: mvn clean install
@@ -67,9 +95,7 @@ jobs:
         provenance: mode=max
         sbom: true
         platforms: linux/amd64,linux/arm64
-        tags: |
-          ghcr.io/${{ github.repository_owner }}/k8s-leader-elector:${{ env.VERSION }}
-          ghcr.io/${{ github.repository_owner }}/k8s-leader-elector:latest
+        tags: ${{ steps.vars.outputs.tags }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 

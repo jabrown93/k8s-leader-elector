@@ -35,3 +35,9 @@ go.work.sum
 # macOS
 .DS_Store
 **/target/
+
+# Node (semantic-release tooling only; no runtime JS in this repo)
+node_modules/
+
+# git worktrees used for agent/branch workflows
+.worktrees/
