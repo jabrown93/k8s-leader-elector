@@ -50,8 +50,13 @@ docker build -t k8s-leader-elector:test .
 ### Releasing
 
 Versioning and releases are fully automated from [Conventional
-Commits](https://www.conventionalcommits.org/) via [semantic-release](https://semantic-release.gitbook.io/)
-(`.releaserc.json`, `.github/workflows/release.yml`). There is no manual tagging step.
+Commits](https://www.conventionalcommits.org/) via [semantic-release](https://semantic-release.gitbook.io/),
+split across two workflows so an image-build failure never leaves a version tagged/released without
+an image: `version-release.yml` (push to `main`/`beta`) runs semantic-release — computes the version,
+bumps `pom.xml`, prepends `CHANGELOG.md`, commits, tags, creates the GitHub Release. `release.yml`
+(tag push `v*.*.*`) builds/pushes/signs the Docker image; being purely tag-triggered and independent
+of semantic-release, it can be re-run on its own if the build/push/sign fails without semantic-release
+re-evaluating whether there's anything new to release. There is no manual tagging step.
 
 - **`main`** is the stable channel: `feat:` → minor bump, `fix:`/`perf:` → patch bump, `feat!:` /
   a `BREAKING CHANGE:` footer → major bump. Publishes tag `vX.Y.Z`, GitHub Release, and Docker
@@ -72,8 +77,12 @@ re-derive the bump from beta's individual commits. So:
 - Title/write the squash commit as a single conventional commit summarizing the batch.
 - If **any** change promoted from beta was breaking, the squash commit must say so (`feat!:` or a
   `BREAKING CHANGE:` footer) or `main` will under-bump.
-- After a stable release lands, open a `main` → `beta` PR (squash; it's a no-op release) so beta's
-  next prerelease baseline doesn't lag the latest stable.
+- `version-release.yml` automatically resets `beta` to `main`'s new tip immediately after every
+  stable release (`--force-with-lease`, aborts instead of clobbering if `beta` moved concurrently).
+  This is a hard reset, not a merge: a squash-merged `main` → `beta` resync would NOT make the
+  stable commit/tag an ancestor of `beta`, and semantic-release determines a branch's last release
+  by tag *reachability* — without this, `beta`'s next prerelease would keep computing from the old,
+  now-superseded prerelease baseline instead of the just-published stable version.
 
 ### Running Locally
 

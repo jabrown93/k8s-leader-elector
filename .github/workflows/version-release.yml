@@ -1,0 +1,74 @@
+name: Version release
+
+on:
+  push:
+    branches: [ main, beta ]
+
+# One version-release attempt per branch at a time.
+concurrency:
+  group: version-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GH_TOKEN }}
+
+    - name: Set up Node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 22
+        cache: npm
+
+    - name: Install release tooling
+      run: npm ci
+
+    - name: Set up JDK 25
+      uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+      with:
+        distribution: corretto
+        java-version: '25'
+        cache: maven
+
+    # semantic-release analyzes commits since the last release tag on this
+    # branch, and only publishes (tags, bumps pom.xml, updates CHANGELOG.md,
+    # creates the GitHub Release) when a feat/fix/breaking commit warrants a
+    # release. A published tag push is what triggers the separate
+    # release.yml workflow to build/push/sign the Docker image — decoupled
+    # so an image-build failure can be retried (re-running failed jobs on
+    # the tag push) without semantic-release re-evaluating whether there's
+    # anything new to release. Authenticated with GH_TOKEN (not the default
+    # GITHUB_TOKEN) because it carries this repo's release-automation bypass
+    # on the main/beta rulesets, needed to push the release commit + tag
+    # directly to the protected branch.
+    - name: Run semantic-release
+      id: release
+      env:
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      run: npx semantic-release
+
+    # A squash merge of main -> beta does NOT make main's commits (or their
+    # tags) ancestors of beta, so semantic-release can't see a stable
+    # release as beta's baseline via a squash-merged resync PR - it would
+    # keep computing beta's next prerelease from the old, now-superseded
+    # prerelease baseline. Resetting beta to main's exact tip is the only
+    # ancestry-correct fix. --force-with-lease is pinned to a SHA fetched
+    # immediately beforehand: if beta moved in between (e.g. a feature PR
+    # merged mid-release), the push aborts instead of silently discarding
+    # that commit.
+    # actions/checkout persisted secrets.GH_TOKEN as the origin credential
+    # above, so this push (to a different ref than was checked out) reuses
+    # it without needing to set it again here.
+    - name: Resync beta to main after a stable release
+      if: steps.release.outputs.published == 'true' && github.ref_name == 'main'
+      run: |
+        git fetch origin beta
+        beta_sha=$(git rev-parse refs/remotes/origin/beta)
+        git push origin "HEAD:refs/heads/beta" --force-with-lease="refs/heads/beta:${beta_sha}"
