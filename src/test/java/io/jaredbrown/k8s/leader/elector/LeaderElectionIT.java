@@ -41,6 +41,12 @@ class LeaderElectionIT {
     private static final String SELECTOR_VALUE = "leader-elector-it";
     private static final String NAMESPACE = "test";
     private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(15);
+    // Tuned test-only lock timings (elector.* validation floors both retry-period and
+    // renew-deadline at 1s). Kept well apart so a reacquisition that only succeeds via the old
+    // key's natural TTL expiry - rather than an explicit unlock() - takes clearly longer than
+    // REACQUIRE_BEFORE_LEASE_EXPIRY_TIMEOUT but still well inside AWAIT_TIMEOUT.
+    private static final Duration LEASE_DURATION = Duration.ofSeconds(5);
+    private static final Duration REACQUIRE_BEFORE_LEASE_EXPIRY_TIMEOUT = Duration.ofSeconds(2);
 
     @Container
     private static final GenericContainer<?> REDIS =
@@ -73,10 +79,13 @@ class LeaderElectionIT {
                 .untilAsserted(() -> assertThat(currentLabel("pod-a")).isEqualTo("false"));
 
         // The lock was actually released in Redis (not just abandoned client-side): a fresh context
-        // for the same pod/lock can immediately reacquire it.
+        // for the same pod/lock reacquires it well inside the lease duration. Bounding this below
+        // the lease is essential, not cosmetic - without it, an unlock() regression would still pass
+        // by having pod-a's orphaned key merely expire on its own, which AWAIT_TIMEOUT's generous 15s
+        // would comfortably hide.
         final ConfigurableApplicationContext second = startPod("pod-a", "lifecycle-lock");
         await()
-                .atMost(AWAIT_TIMEOUT)
+                .atMost(REACQUIRE_BEFORE_LEASE_EXPIRY_TIMEOUT)
                 .untilAsserted(() -> assertThat(currentLabel("pod-a")).isEqualTo("true"));
     }
 
@@ -127,7 +136,7 @@ class LeaderElectionIT {
                             "elector.selector-label-value=" + SELECTOR_VALUE,
                             // Tuned well below production defaults so acquisition/renewal/failover
                             // settle in seconds rather than minutes.
-                            "elector.lease-duration=3s",
+                            "elector.lease-duration=" + LEASE_DURATION,
                             "elector.renew-deadline=1s",
                             "elector.retry-period=1s")
                 .run();
