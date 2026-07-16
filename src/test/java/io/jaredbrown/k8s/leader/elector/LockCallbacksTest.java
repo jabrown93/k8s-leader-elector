@@ -248,6 +248,28 @@ class LockCallbacksTest {
     }
 
     @Test
+    void reconcileLeaderLabels_shouldTreatNullLabelsMapAsNeedingUpdate() {
+        // Given: a pod whose metadata carries no labels map at all (not merely missing the leader
+        // key) — e.g. a pod that predates the label selector requirement.
+        final PodResource podResource = mock(PodResource.class);
+        final Pod podWithNoLabels = pod("pod-2");
+        podWithNoLabels
+                .getMetadata()
+                .setLabels(null);
+
+        when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
+        when(labeledPods.list()).thenReturn(podList);
+        when(podList.getItems()).thenReturn(List.of(podWithNoLabels));
+        when(namespacedPods.withName("pod-2")).thenReturn(podResource);
+
+        // When
+        lockCallbacks.reconcileLeaderLabels(() -> true);
+
+        // Then: a null labels map is treated as drifted (current=null != "false") and gets patched.
+        verify(podResource).patch(any(PatchContext.class), any(Pod.class));
+    }
+
+    @Test
     void reconcileLeaderLabels_shouldNotThrowWhenPodListQueryFails() {
         // Given
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
