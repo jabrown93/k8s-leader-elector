@@ -35,7 +35,7 @@
 
 - Test file naming/location rule: `<ClassUnderTest>Test.java`, same package as the class under test, under `src/test/java/...` mirroring `src/main/java/...`.
 - Mocking strategy norm: `@ExtendWith(MockitoExtension.class)` + `@Mock` fields + `lenient().when(...)` for stubs not used by every test in the class (avoids `UnnecessaryStubbingException` noise) — consistent across `ElectorServiceTest`, `LockCallbacksTest`, `HealthProbeTest`. `ReflectionTestUtils` used to set private fields not exposed via constructor (`selfPodName` in `LockCallbacksTest.java:61`, scheduler internals in `TaskSchedulerConfigurationTest.java:18,23`). A custom `MutableClock` test double is injected via the `Clock` bean for deterministic time-based assertions (`ElectorServiceTest.java:62,68`, enabled by `TaskSchedulerConfiguration.clock()` being a real bean rather than `Clock.systemUTC()` inlined).
-- Coverage expectation: `[TODO]` — no coverage tool (JaCoCo, etc.) or threshold found in `pom.xml` or CI config.
+- Coverage expectation: JaCoCo enforces a minimum 85% line-coverage ratio on `mvn verify` (`pom.xml`, `jacoco-maven-plugin` `check` execution bound to the `verify` phase).
 
 ### 6) Evidence
 

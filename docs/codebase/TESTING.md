@@ -27,7 +27,7 @@ No separate integration/e2e test command exists — there is only one test phase
 | Scope | Covered? | Typical target | Notes |
 |-------|----------|----------------|-------|
 | Unit | Yes | `ElectorService`, `LockCallbacks`, `HealthProbe`, `ElectorProperties`, `TaskSchedulerConfiguration` — every main class has a matching test class | All collaborators (Redis lock registry, K8s client, task scheduler, clock) are mocked; `ElectorPropertiesTest` uses a real Jakarta `Validator` to exercise Bean Validation constraints end-to-end (`ElectorPropertiesTest.java:21-33`) |
-| Integration | No | — | No test hits a real Redis instance or a real (or Testcontainers-backed) Kubernetes API; `KubernetesClient` and `RedisLockRegistry` are always Mockito mocks |
+| Integration | Yes | `LeaderElectionIT` (real Redis via Testcontainers + Fabric8 `KubernetesServer` mock K8s API) | Added on `main` (#94); exercises the full acquire → reconcile-labels → renew → release lifecycle across two simulated pods |
 | E2E | No | — | No end-to-end test exercising the full sidecar against a live cluster; would have to be validated manually/in a real deployment |
 
 ### 4) Mocking and Isolation Strategy
@@ -38,9 +38,9 @@ No separate integration/e2e test command exists — there is only one test phase
 
 ### 5) Coverage and Quality Signals
 
-- Coverage tool + threshold: `[TODO]` — no JaCoCo (or similar) plugin in `pom.xml`, no coverage gate in `ci.yml`.
-- Current reported coverage: `[TODO]` — not measured/published anywhere in-repo.
-- Known gaps/flaky areas: no integration-level test against real Redis or a real/fake Kubernetes API server (e.g. via Testcontainers or Fabric8's `KubernetesServer` test fixture) — all Kubernetes/Redis interaction is verified purely through Mockito interaction verification, so a contract drift in either client library (e.g. a Fabric8 fluent-API change) would not be caught by tests, only by `mvn verify` failing to compile or by production behavior.
+- Coverage tool + threshold: JaCoCo (`jacoco-maven-plugin`), bound to `test` (report) and `verify` (check) — `mvn verify` fails if line coverage drops below 85% (`pom.xml`). Report generated at `target/site/jacoco/index.html`.
+- Current reported coverage: 98.73% lines (311/315), up from the 91.75% (289/315) baseline measured when the JaCoCo gate was introduced, after merging `main`'s config-bean tests (#93) and `LeaderElectionIT` (#94). `ElectorService` 100%, `LockCallbacks` 100%, `HealthProbe` 100%, `K8sClientConfiguration` 100%, `RedisLockRegistryConfiguration` 100%, `TaskSchedulerConfiguration` 88.9% (only the `Clock.systemUTC()` bean-factory line is unexercised — tests substitute a `MutableClock`). The remaining gap is `Application`'s `main()` entrypoint (0%, 3 lines), which only runs under `SpringApplication.run` and is not expected to be unit-testable.
+- Known gaps/flaky areas: no flaky-test history or known-flaky markers found. The prior integration-test gap (no test against a real Redis or Kubernetes API) was closed by `LeaderElectionIT` (real Redis via Testcontainers + Fabric8 `KubernetesServer` mock, added on `main` #94).
 
 ### 6) Evidence
 

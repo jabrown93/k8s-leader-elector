@@ -29,6 +29,7 @@
 | Tool | Purpose | Evidence |
 |------|---------|----------|
 | JUnit 5 (Jupiter) + Mockito | Unit testing (`spring-boot-starter-test`, `mockito-core`) | `pom.xml:72-81`, all files in `src/test/java` |
+| JaCoCo (`jacoco-maven-plugin`) | Line-coverage report + enforced 85% minimum gate on `mvn verify` | `pom.xml` (`jacoco-maven-plugin` execution block) |
 | `maven-compiler-plugin` 3.15.0 | Compiles with Lombok annotation processor | `pom.xml:112-125` |
 | `spring-boot-maven-plugin` | Builds the executable/thin jar, sets main class | `pom.xml:105-111` |
 | `cyclonedx-maven-plugin` 2.9.2 | Generates CycloneDX SBOM (`target/sbom.cdx.json`), invoked explicitly by CI, not bound to the default lifecycle | `pom.xml:130-139`, `.github/workflows/dt-sbom.yml:48-49` |
