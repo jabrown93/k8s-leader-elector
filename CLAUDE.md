@@ -47,6 +47,34 @@ docker build -t k8s-leader-elector:test .
 - Heap sized dynamically: 50-75% of container memory allocation
 - OOM behavior: exits cleanly and creates heap dump at `/tmp/heapdump.hprof`
 
+### Releasing
+
+Versioning and releases are fully automated from [Conventional
+Commits](https://www.conventionalcommits.org/) via [semantic-release](https://semantic-release.gitbook.io/)
+(`.releaserc.json`, `.github/workflows/release.yml`). There is no manual tagging step.
+
+- **`main`** is the stable channel: `feat:` → minor bump, `fix:`/`perf:` → patch bump, `feat!:` /
+  a `BREAKING CHANGE:` footer → major bump. Publishes tag `vX.Y.Z`, GitHub Release, and Docker
+  image `ghcr.io/jabrown93/k8s-leader-elector:X.Y.Z` + `:latest`.
+- **`beta`** is the prerelease channel: same commit-type rules, but produces `X.Y.Z-beta.N` and
+  Docker image `:X.Y.Z-beta.N` + `:beta` (never `:latest`).
+- Every release bumps `pom.xml`'s `<version>`, prepends `CHANGELOG.md`, and commits both back to
+  the branch (`chore(release): X.Y.Z [skip ci]`) — that commit is what carries `[skip ci]`, not
+  every commit, so normal pushes still run CI.
+- A push with no releasable commits (e.g. `chore:`/`docs:` only) runs the workflow but publishes
+  nothing — this is expected, not a failure.
+
+**Promoting `beta` → `main`:** open a PR (base `main`, compare `beta`) and **squash-merge** it
+(both branches only allow squash). semantic-release on `main` reads that ONE squash commit and
+bumps from the last *stable* tag by its type — it does not carry over the `-beta.N` counter or
+re-derive the bump from beta's individual commits. So:
+
+- Title/write the squash commit as a single conventional commit summarizing the batch.
+- If **any** change promoted from beta was breaking, the squash commit must say so (`feat!:` or a
+  `BREAKING CHANGE:` footer) or `main` will under-bump.
+- After a stable release lands, open a `main` → `beta` PR (squash; it's a no-op release) so beta's
+  next prerelease baseline doesn't lag the latest stable.
+
 ### Running Locally
 
 The application requires:

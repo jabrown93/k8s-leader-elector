@@ -71,4 +71,9 @@ to a status file (typically on a shared `emptyDir`) and refreshes it; the electo
 | `ELECTOR_HEALTH_PROBE_DEADLOCK_GRACE` | `5m` | How long to wait before leading degraded when no pod is healthy |
 | `ELECTOR_HEALTH_PROBE_UNHEALTHY_BACKOFF` | `30s` | Re-probe interval for an unhealthy pod (keeps it from starving healthy peers) |
 
+## Releasing
 
+Versions and releases are automated from [Conventional Commits](https://www.conventionalcommits.org/)
+via [semantic-release](https://semantic-release.gitbook.io/) — no manual tagging. `main` publishes
+stable releases (`vX.Y.Z`); `beta` publishes prereleases (`vX.Y.Z-beta.N`). See the "Releasing"
+section in [CLAUDE.md](CLAUDE.md) for the full model and the `beta` → `main` promotion procedure.
