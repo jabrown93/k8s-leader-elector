@@ -31,10 +31,12 @@ embedding its own election logic.
   acquisition, so a pod created or missed after the last election catches up within one renewal
   interval instead of staying wrong until the next leadership change.
 - **Optional health gating** — wire in your own liveness signal and an unhealthy pod won't acquire
-  or keep leadership, with a deadlock escape hatch so the system never ends up leaderless.
+  or keep leadership, with a deadlock escape hatch so the system doesn't stay leaderless forever
+  even when every pod is unhealthy.
 - **Graceful shutdown** — the lock is released and the leader label cleared before the pod
   terminates, within `terminationGracePeriodSeconds`.
-- **Minimal image** — no kubectl baked in; just a JVM and `tini` for signal handling.
+- **Tool-free image** — no kubectl baked in; just a JVM and `tini` for signal handling. (The Alpine
+  base still carries `/bin/sh`, so this isn't a distroless-level minimal image.)
 
 ## How it works
 
@@ -80,9 +82,15 @@ mvn clean install
 
 ### Run locally
 
-The elector needs `POD_NAME` and enough config to know which lock and labels to use:
+The elector needs `POD_NAME` and enough config to know which lock and labels to use. `POD_NAME`
+must match the name of a real Pod in your current kube context that carries the selector label
+below — the elector patches that Pod by name, so a name with no matching Pod will still acquire
+the Redis lock but log a failed self-patch on every reconcile.
 
 ```bash
+# Create a placeholder Pod for the elector to label (skip if you already have one):
+kubectl run local-test --image=registry.k8s.io/pause:3.9 --labels=app=my-app
+
 export POD_NAME=local-test
 export ELECTOR_LABEL_KEY=dns.jb.io/leader
 export ELECTOR_LOCK_NAME=my-app-lock
@@ -130,6 +138,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: my-app
+    namespace: my-namespace # required: ServiceAccount subjects don't default to the RoleBinding's namespace
 roleRef:
   kind: Role
   name: leader-elector
@@ -172,7 +181,10 @@ spec:
 ```
 
 Downstream consumers then just select on the label, e.g. `kubectl get pods -l dns.jb.io/leader=true`,
-or point a `Service` at it for exactly-once routing.
+or point a `Service` at it to route to whichever pod(s) currently carry the leader label. Label
+reconciliation is sequential and tolerates per-pod patch failures until the next renewal, so during
+acquisition or failover the Service can briefly expose zero or more than one endpoint — it's not an
+exactly-once routing guarantee.
 
 ## Configuration
 
