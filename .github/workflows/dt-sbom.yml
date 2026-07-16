@@ -1,7 +1,6 @@
 ---
 # Upload a CycloneDX SBOM of this repo's resolved Maven dependencies to the
-# homelab Dependency-Track instance. This is the FOSSA replacement (fossa.yml
-# stays in place until DT is proven out across the OSS repos).
+# homelab Dependency-Track instance.
 #
 # Two jobs, because only one of them may touch the cluster:
 #   sbom   - hosted runner (UNTRUSTED): resolve the full Maven dependency graph
