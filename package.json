@@ -3,12 +3,12 @@
   "private": true,
   "description": "CI-only tooling for conventional-commit versioning; no runtime JS in this repo",
   "devDependencies": {
-    "semantic-release": "^25.0.7",
-    "@semantic-release/changelog": "^6.0.3",
-    "@semantic-release/commit-analyzer": "^13.0.1",
-    "@semantic-release/exec": "^7.1.0",
-    "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^12.0.9",
-    "@semantic-release/release-notes-generator": "^14.1.1"
+    "semantic-release": "25.0.7",
+    "@semantic-release/changelog": "6.0.3",
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/exec": "7.1.0",
+    "@semantic-release/git": "10.0.1",
+    "@semantic-release/github": "12.0.9",
+    "@semantic-release/release-notes-generator": "14.1.1"
   }
 }
