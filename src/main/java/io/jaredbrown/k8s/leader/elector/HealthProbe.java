@@ -18,6 +18,13 @@ import java.time.Instant;
  * writes "healthy"/"unhealthy" to a file and keeps its modification time fresh; the elector only
  * reads it. A missing, stale, or non-healthy file is reported as unhealthy. When the probe is
  * disabled the pod is always considered healthy, so a probe-less elector is unchanged.
+ *
+ * <p><b>Writer contract:</b> {@link #isHealthy()} checks readability, freshness, and content in
+ * three separate filesystem calls, not one atomic read. The writer must therefore write to a
+ * temporary file in the same directory and atomically rename it into place (e.g.
+ * {@code Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE)}), never write the target path
+ * in place - otherwise this probe can observe a partially-written file and report a spurious,
+ * transient "unhealthy".
  */
 @Slf4j
 @Component

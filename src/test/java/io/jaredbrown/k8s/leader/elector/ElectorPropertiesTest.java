@@ -297,6 +297,119 @@ class ElectorPropertiesTest {
     }
 
     @Test
+    void shouldFailValidationWhenLeaseDurationIsZero() {
+        // Given
+        final ElectorProperties properties = validProperties();
+        properties.setLeaseDuration(Duration.ZERO);
+
+        // When
+        final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
+
+        // Then
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("leaseDuration")));
+    }
+
+    @Test
+    void shouldFailValidationWhenRenewDeadlineIsNegative() {
+        // Given
+        final ElectorProperties properties = validProperties();
+        properties.setRenewDeadline(Duration.ofSeconds(-1));
+
+        // When
+        final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
+
+        // Then
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("renewDeadline")));
+    }
+
+    @Test
+    void shouldFailValidationWhenRetryPeriodIsZero() {
+        // Given: a zero retry period would spin lockLoop in a tight busy-loop against Redis.
+        final ElectorProperties properties = validProperties();
+        properties.setRetryPeriod(Duration.ZERO);
+
+        // When
+        final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
+
+        // Then
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("retryPeriod")));
+    }
+
+    @Test
+    void shouldFailValidationWhenHealthProbeUnhealthyBackoffIsZero() {
+        // Given
+        final ElectorProperties properties = validProperties();
+        properties.setHealthProbeUnhealthyBackoff(Duration.ZERO);
+
+        // When
+        final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
+
+        // Then
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("healthProbeUnhealthyBackoff")));
+    }
+
+    @Test
+    void shouldFailValidationWhenHealthProbeDeadlockGraceIsNegative() {
+        // Given
+        final ElectorProperties properties = validProperties();
+        properties.setHealthProbeDeadlockGrace(Duration.ofSeconds(-1));
+
+        // When
+        final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
+
+        // Then
+        assertTrue(violations
+                           .stream()
+                           .anyMatch(v -> v
+                                   .getPropertyPath()
+                                   .toString()
+                                   .equals("healthProbeDeadlockGrace")));
+    }
+
+    @Test
+    void shouldPassValidationWhenHealthProbeDeadlockGraceIsZero() {
+        // Given: zero is a deliberate, tested value (breaks the deadlock immediately) - must remain
+        // legal even though negative values (which behave identically) are now rejected.
+        final ElectorProperties properties = validProperties();
+        properties.setHealthProbeDeadlockGrace(Duration.ZERO);
+
+        // When
+        final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
+
+        // Then
+        assertTrue(violations.isEmpty());
+    }
+
+    private static ElectorProperties validProperties() {
+        final ElectorProperties properties = new ElectorProperties();
+        properties.setLabelKey("test-label");
+        properties.setLockName("test-lock");
+        properties.setSelectorLabelKey("app");
+        properties.setSelectorLabelValue("test-app");
+        return properties;
+    }
+
+    @Test
     void shouldPassValidationWhenAllRequiredFieldsAreSet() {
         // Given
         final ElectorProperties properties = new ElectorProperties();

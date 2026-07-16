@@ -31,7 +31,17 @@ Bind via environment variables (Spring relaxed binding, e.g. `elector.labelKey` 
 | `ELECTOR_RENEW_DEADLINE` | `60s` | Lock renew interval |
 | `ELECTOR_RETRY_PERIOD` | `5s` | Acquire retry / `tryLock` wait |
 | `SPRING_DATA_REDIS_HOST` | `localhost` | Redis host backing the lock |
-| `POD_NAME` | — | This pod's name (downward API) |
+| `POD_NAME` | — | This pod's name (downward API). **Required, no default** — the app fails to start without it, since a missing/wrong value would silently prevent the leader label from ever being applied to any pod. |
+
+### Securing Redis
+
+Leadership is only as trustworthy as the Redis instance backing it: the lock is a compare-and-swap
+Lua script keyed on a per-instance client ID, but that guarantee only holds against other clients
+speaking the same protocol. Anything that can reach this Redis instance and issue a raw `SET` on
+the lock key can forge or steal "leadership" outright, bypassing the CAS entirely. Run this against
+a Redis instance that untrusted workloads cannot reach, and configure auth/TLS
+(`spring.data.redis.password`, `spring.data.redis.ssl.enabled`, etc.) as appropriate for your
+environment — neither is enabled by default.
 
 ### Optional health-gated leadership
 
