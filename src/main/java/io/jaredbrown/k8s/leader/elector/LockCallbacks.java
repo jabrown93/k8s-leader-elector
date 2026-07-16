@@ -25,7 +25,11 @@ public class LockCallbacks {
     @Nonnull
     private final KubernetesClient kubernetesClient;
 
-    @Value("${POD_NAME:unknown}")
+    // No default: POD_NAME identifies this pod for every label decision below, so a missing value
+    // must fail context startup rather than silently compare every real pod name against a
+    // placeholder that never matches, which would mislabel this pod as a follower even while it
+    // holds the Redis lock.
+    @Value("${POD_NAME}")
     private String selfPodName;
 
     public void onLockAcquired(final BooleanSupplier stillLeader) {

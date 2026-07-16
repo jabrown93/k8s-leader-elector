@@ -188,7 +188,7 @@ reconcile issues no extra Redis calls.
 ### Kubernetes Client Request Bounds
 
 `K8sClientConfiguration` overrides two fabric8 defaults on the `KubernetesClient` bean:
-`requestTimeout` (10s → 2.5s) and `requestRetryBackoffLimit` (10 → 3). Every K8s API call runs
+`requestTimeout` (10s → 2s) and `requestRetryBackoffLimit` (10 → 1). Every K8s API call runs
 inline on `ElectorService`'s single scheduler thread, so an unbounded call would (a) block the
 shutdown-time lock release past its 5s `RELEASE_TIMEOUT` window and (b) in the extreme stall lock
 renewal past the lease while a label reconcile is mid-flight. Bounding the per-call time keeps a whole
