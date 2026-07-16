@@ -34,7 +34,7 @@ embedding its own election logic.
   or keep leadership, with a deadlock escape hatch so the system never ends up leaderless.
 - **Graceful shutdown** — the lock is released and the leader label cleared before the pod
   terminates, within `terminationGracePeriodSeconds`.
-- **Tool-free image** — no shell, no kubectl baked in; just a JVM and `tini` for signal handling.
+- **Minimal image** — no kubectl baked in; just a JVM and `tini` for signal handling.
 
 ## How it works
 
