@@ -28,7 +28,7 @@
         <!-- Matches the kubernetes-client version resolved transitively via
              spring-cloud-starter-kubernetes-client-all, so the mock server speaks the same
              API version as the real client used in production. -->
-        <fabric8-kubernetes-client.version>7.4.1</fabric8-kubernetes-client.version>
+        <fabric8-kubernetes-client.version>7.8.0</fabric8-kubernetes-client.version>
     </properties>
 
     <dependencies>
