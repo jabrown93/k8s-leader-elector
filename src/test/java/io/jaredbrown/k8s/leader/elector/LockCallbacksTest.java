@@ -329,6 +329,28 @@ class LockCallbacksTest {
     }
 
     @Test
+    void reconcileLeaderLabels_shouldStopPaginatingOnceOwnershipLostMidList() {
+        // Given: the selector matches enough pods to span two pages, but ownership is lost right
+        // after the first page comes back - before a second page is ever fetched.
+        final PodList page1 = mock(PodList.class);
+        final ListMeta page1Meta = new ListMeta();
+        page1Meta.setContinue("page-2-token");
+        when(page1.getItems()).thenReturn(List.of(podWithLabel(SELF_POD_NAME, "false")));
+        when(page1.getMetadata()).thenReturn(page1Meta);
+
+        when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(page1);
+
+        // When: the ownership recheck between pages fails.
+        lockCallbacks.reconcileLeaderLabels(() -> false);
+
+        // Then: only the first page was fetched, and the drifted pod from that page was never
+        // patched either (reconcileLeaderLabels' own patch-loop check catches it independently).
+        verify(labeledPods).list(any(ListOptions.class));
+        verify(namespacedPods, never()).withName(any(String.class));
+    }
+
+    @Test
     void onLockLost_shouldInvokeKubernetesClient() {
         // Given - mock the full chain needed for onLockLost
         final PodResource podResource = mock(PodResource.class);

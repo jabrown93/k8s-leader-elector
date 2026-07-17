@@ -76,7 +76,7 @@ public class LockCallbacks {
     public void reconcileLeaderLabels(final BooleanSupplier stillLeader) {
         final String namespace = kubernetesClient.getNamespace();
         try {
-            final List<Pod> pods = listMatchingPods(namespace);
+            final List<Pod> pods = listMatchingPods(namespace, stillLeader);
 
             int updated = 0;
             int failures = 0;
@@ -117,7 +117,17 @@ public class LockCallbacks {
     // an attacker who can create pods carrying this app's selector label could otherwise inflate a
     // single unpaginated list() call past K8sClientConfiguration's 2s request timeout, silently
     // skipping this entire reconcile cycle (caught by the KubernetesClientException handler below).
-    private List<Pod> listMatchingPods(final String namespace) {
+    //
+    // An inflated matching-pod count could just as easily turn *this* loop into an unbounded run of
+    // sequential page fetches, all buffered before the patch loop's first stillLeader check - stalling
+    // the single scheduler thread past renewDeadline (or even leaseDuration) and forcing leadership
+    // loss, which is the opposite of what pagination is for. Re-checking stillLeader before each
+    // subsequent page closes that: it halts pagination the moment ownership is actually lost (same as
+    // the patch loop), and on every other call it renews the Redis lease as a side effect (see
+    // ElectorService#stillOwnsLock), so a long-but-still-legitimate multi-page listing keeps the lease
+    // alive instead of racing it. Only checked when another page remains, so the common single-page
+    // case issues no extra Redis call.
+    private List<Pod> listMatchingPods(final String namespace, final BooleanSupplier stillLeader) {
         final List<Pod> pods = new ArrayList<>();
         String continueToken = null;
         do {
@@ -133,6 +143,11 @@ public class LockCallbacks {
             continueToken = page
                     .getMetadata()
                     .getContinue();
+            if (StringUtils.hasText(continueToken) && !stillLeader.getAsBoolean()) {
+                log.warn("Halting pod-list pagination: leadership no longer confirmed " +
+                         "({} pods collected before ownership was lost)", pods.size());
+                return pods;
+            }
         } while (StringUtils.hasText(continueToken));
         return pods;
     }
