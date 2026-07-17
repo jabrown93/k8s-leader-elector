@@ -41,24 +41,30 @@ import java.util.concurrent.TimeoutException;
  *
  * <p><b>Read timeout:</b> the file-type check and the read are two separate filesystem calls, so a
  * co-located writer that replaces the file with a FIFO in between can still route the read into a
- * blocking {@code open()}. The read therefore runs on a dedicated single background thread bounded
- * by {@link #READ_TIMEOUT}, so a blocked open can never wedge the caller — only that background
- * thread, which is abandoned (not interrupted, since a blocking FIFO open is not interruptible).
+ * blocking {@code open()}. The read therefore runs on a single background thread bounded by
+ * {@link #readTimeout}, so a blocked open can never wedge the caller — only that background
+ * thread, which is abandoned (not interrupted, since a blocking FIFO open is not interruptible). A
+ * timed-out read replaces the executor with a fresh one, so a later call - once the path is a
+ * normal file again - gets a usable thread instead of queuing forever behind the abandoned task.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class HealthProbe {
-    private static final Duration READ_TIMEOUT = Duration.ofSeconds(2);
-
     @Nonnull
     private final ElectorProperties electorProperties;
 
-    private final ExecutorService fileReadExecutor = Executors.newSingleThreadExecutor(runnable -> {
-        final Thread thread = new Thread(runnable, "health-probe-file-read");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private Duration readTimeout = Duration.ofSeconds(2);
+
+    private volatile ExecutorService fileReadExecutor = newFileReadExecutor();
+
+    private static ExecutorService newFileReadExecutor() {
+        return Executors.newSingleThreadExecutor(runnable -> {
+            final Thread thread = new Thread(runnable, "health-probe-file-read");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
 
     @PreDestroy
     void shutdown() {
@@ -112,11 +118,17 @@ public class HealthProbe {
             try {
                 content = fileReadExecutor
                         .submit(() -> Files.readString(path))
-                        .get(READ_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)
+                        .get(readTimeout.toMillis(), TimeUnit.MILLISECONDS)
                         .trim();
             } catch (final TimeoutException e) {
+                // The submitted task is likely still blocked forever (e.g. an unopened FIFO) and
+                // this executor's single thread can never run anything else. Replace it so the next
+                // call gets a usable thread instead of queuing behind a task that will never finish.
+                final ExecutorService staleExecutor = fileReadExecutor;
+                fileReadExecutor = newFileReadExecutor();
+                staleExecutor.shutdownNow();
                 log.error("Timed out after {} reading health status file {}; reporting unhealthy",
-                          READ_TIMEOUT,
+                          readTimeout,
                           filePath);
                 return false;
             } catch (final ExecutionException e) {
