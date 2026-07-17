@@ -12,9 +12,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -129,6 +131,62 @@ class HealthProbeTest {
         enabled(fifo, Duration.ofMinutes(2));
 
         assertFalse(new HealthProbe(electorProperties).isHealthy());
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    @Timeout(30)
+    void isHealthy_neverBlocksBeyondReadTimeoutUnderFileTypeRace() throws IOException, InterruptedException {
+        // Regression test for the TOCTOU window between the isRegularFile() check and the read: a
+        // co-located writer can atomically replace the file with a FIFO after the check passes but
+        // before Files.readString() opens it. A background thread ping-pongs the path between a
+        // regular file and a FIFO via fast atomic renames (fast enough to land inside that window
+        // at least sometimes) while the foreground repeatedly calls isHealthy() and asserts every
+        // call still returns promptly — proving the bounded read, not just the upfront check, is
+        // what keeps the caller from being wedged.
+        final Path path = tempDir.resolve("status-race");
+        final Path regularSource = tempDir.resolve("regular-source");
+        final Path fifoSource = tempDir.resolve("fifo-source");
+        Files.writeString(regularSource, "healthy");
+        assertEquals(0, new ProcessBuilder("mkfifo", fifoSource
+                .toAbsolutePath()
+                .toString())
+                .inheritIO()
+                .start()
+                .waitFor());
+        Files.move(regularSource, path);
+        enabled(path, Duration.ofMinutes(2));
+        final HealthProbe healthProbe = new HealthProbe(electorProperties);
+
+        final AtomicBoolean stop = new AtomicBoolean(false);
+        final Thread swapper = new Thread(() -> {
+            while (!stop.get()) {
+                try {
+                    Files.move(path, regularSource, StandardCopyOption.REPLACE_EXISTING);
+                    Files.move(regularSource, path, StandardCopyOption.REPLACE_EXISTING);
+                    Files.move(path, fifoSource, StandardCopyOption.REPLACE_EXISTING);
+                    Files.move(fifoSource, path, StandardCopyOption.REPLACE_EXISTING);
+                } catch (final IOException ignored) {
+                    // The foreground thread may observe `path` transiently missing mid-swap; retry.
+                }
+            }
+        });
+        swapper.setDaemon(true);
+        swapper.start();
+        try {
+            for (int i = 0; i < 10; i++) {
+                final long startNanos = System.nanoTime();
+                healthProbe.isHealthy();
+                final long elapsedMillis = Duration
+                        .ofNanos(System.nanoTime() - startNanos)
+                        .toMillis();
+                assertTrue(elapsedMillis < 3000,
+                           "isHealthy() took " + elapsedMillis + "ms, exceeding the bounded read timeout");
+            }
+        } finally {
+            stop.set(true);
+            swapper.join();
+        }
     }
 
     @Test

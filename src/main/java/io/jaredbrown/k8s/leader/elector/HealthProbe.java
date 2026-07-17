@@ -1,6 +1,7 @@
 package io.jaredbrown.k8s.leader.elector;
 
 import jakarta.annotation.Nonnull;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,11 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Decides whether this pod is fit to lead by reading a status file the application maintains.
@@ -29,17 +35,35 @@ import java.time.Instant;
  *
  * <p><b>File type:</b> only a regular file (not a symlink) is accepted — anything else, including
  * a FIFO, socket, device file, directory, or symlink, is reported unhealthy without being opened.
- * This keeps a co-located writer from wedging the elector's single scheduler thread on a blocking
- * FIFO open, and keeps a symlink from redirecting the read to an arbitrary file the elector process
- * can access. On a content mismatch, only a fixed message is logged, never the file's raw content,
- * so this probe cannot be used to exfiltrate file contents into application logs.
+ * This keeps a symlink from redirecting the read to an arbitrary file the elector process can
+ * access. On a content mismatch, only a fixed message is logged, never the file's raw content, so
+ * this probe cannot be used to exfiltrate file contents into application logs.
+ *
+ * <p><b>Read timeout:</b> the file-type check and the read are two separate filesystem calls, so a
+ * co-located writer that replaces the file with a FIFO in between can still route the read into a
+ * blocking {@code open()}. The read therefore runs on a dedicated single background thread bounded
+ * by {@link #READ_TIMEOUT}, so a blocked open can never wedge the caller — only that background
+ * thread, which is abandoned (not interrupted, since a blocking FIFO open is not interruptible).
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class HealthProbe {
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(2);
+
     @Nonnull
     private final ElectorProperties electorProperties;
+
+    private final ExecutorService fileReadExecutor = Executors.newSingleThreadExecutor(runnable -> {
+        final Thread thread = new Thread(runnable, "health-probe-file-read");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    @PreDestroy
+    void shutdown() {
+        fileReadExecutor.shutdownNow();
+    }
 
     /**
      * @return {@code true} if probing is disabled, or the status file exists, is fresh enough, and
@@ -84,9 +108,28 @@ public class HealthProbe {
                 }
             }
 
-            final String content = Files
-                    .readString(path)
-                    .trim();
+            final String content;
+            try {
+                content = fileReadExecutor
+                        .submit(() -> Files.readString(path))
+                        .get(READ_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)
+                        .trim();
+            } catch (final TimeoutException e) {
+                log.error("Timed out after {} reading health status file {}; reporting unhealthy",
+                          READ_TIMEOUT,
+                          filePath);
+                return false;
+            } catch (final ExecutionException e) {
+                log.error("Failed to read health status file {}; reporting unhealthy", filePath, e.getCause());
+                return false;
+            } catch (final InterruptedException e) {
+                Thread
+                        .currentThread()
+                        .interrupt();
+                log.error("Interrupted while reading health status file {}; reporting unhealthy", filePath);
+                return false;
+            }
+
             final boolean healthy = content.equals(electorProperties.getHealthProbeHealthyContent());
             if (!healthy) {
                 log.warn("Health status file {} content did not match the configured healthy value; "
