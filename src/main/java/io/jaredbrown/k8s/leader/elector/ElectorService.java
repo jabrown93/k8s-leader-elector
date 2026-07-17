@@ -354,8 +354,15 @@ public class ElectorService implements SmartLifecycle {
     // genuine "no longer the owner" signal (a lapsed lease another pod already took), not just local
     // state — a purely local check can't see a Redis-side takeover. Runs on the scheduler thread, the
     // same thread as the reconcile that calls it.
+    //
+    // Also gates on running: renewLock alone would keep succeeding straight through shutdown, letting
+    // a reconcile spanning many pod-list pages stall the single scheduler thread well past stop()'s 5s
+    // RELEASE_TIMEOUT. This matters most for the acquisition-time reconcile (becomeLeader ->
+    // onLockAcquired), which runs before scheduleRefreshTask() creates refreshFuture — cancelRefreshTask()
+    // has nothing to interrupt yet at that point, so this running check is the only thing that can cut a
+    // long reconcile short once stop() has fired, letting the queued lock-release task run promptly.
     boolean stillOwnsLock() {
-        if (lock.get() == null) {
+        if (!running.get() || lock.get() == null) {
             return false;
         }
         try {
