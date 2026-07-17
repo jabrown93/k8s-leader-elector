@@ -16,8 +16,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
 
@@ -68,88 +66,85 @@ public class LockCallbacks {
     // labeling problem is a side effect of leadership, not a reason to give it up, and the next
     // renewal tick (at most renewDeadline away) retries automatically.
     //
+    // Paginated (RECONCILE_LIST_PAGE_SIZE per page, matching client-go's own default chunk size) and
+    // patches each page's drifted pods before fetching the next, rather than buffering the whole
+    // match set first. Both are attacker-inflated-pod-count defenses: an unpaginated list() could
+    // exceed K8sClientConfiguration's 2s request timeout outright, and buffering every page before
+    // patching would leave heap usage unbounded even though each individual request stays small.
+    // Processing page-by-page bounds peak memory to one page's worth of pods regardless of total
+    // match count.
+    //
     // stillLeader re-confirms leadership (Redis-side; see ElectorService#stillOwnsLock) immediately
-    // before mutating each drifted pod. A reconcile that outlives the lease — a very slow API server
-    // or many drifted pods — must not keep stamping this pod's stale identity after another pod has
-    // taken over the lock, which would flip the new leader's label back to false and leave the
-    // deployment momentarily leaderless until the new leader's next reconcile.
+    // before mutating each drifted pod, and again before fetching another page. A reconcile that
+    // outlives the lease — a very slow API server, many drifted pods, or simply many pages — must not
+    // keep stamping this pod's stale identity (or keep paginating at all) after another pod has taken
+    // over the lock: stamping stale labels would flip the new leader's label back to false and leave
+    // the deployment momentarily leaderless, and unconditionally continued pagination could stall the
+    // single scheduler thread past renewDeadline. Every stillLeader call besides the last also renews
+    // the Redis lease as a side effect, so a long-but-still-legitimate multi-page reconcile keeps the
+    // lease alive instead of racing it. The pre-next-page check only fires when another page remains,
+    // so the common single-page case issues no extra Redis call beyond what patching already needs.
     public void reconcileLeaderLabels(final BooleanSupplier stillLeader) {
         final String namespace = kubernetesClient.getNamespace();
         try {
-            final List<Pod> pods = listMatchingPods(namespace, stillLeader);
-
             int updated = 0;
             int failures = 0;
-            for (final Pod pod : pods) {
-                final String podName = pod
-                        .getMetadata()
-                        .getName();
-                final boolean isLeader = podName.equals(selfPodName);
+            int total = 0;
+            String continueToken = null;
+            do {
+                final PodList page = kubernetesClient
+                        .pods()
+                        .inNamespace(namespace)
+                        .withLabel(electorProperties.getSelectorLabelKey(), electorProperties.getSelectorLabelValue())
+                        .list(new ListOptionsBuilder()
+                                      .withLimit(RECONCILE_LIST_PAGE_SIZE)
+                                      .withContinue(continueToken)
+                                      .build());
 
-                if (!needsLabelUpdate(pod, isLeader)) {
-                    continue;
+                for (final Pod pod : page.getItems()) {
+                    total++;
+                    final String podName = pod
+                            .getMetadata()
+                            .getName();
+                    final boolean isLeader = podName.equals(selfPodName);
+
+                    if (!needsLabelUpdate(pod, isLeader)) {
+                        continue;
+                    }
+                    if (!stillLeader.getAsBoolean()) {
+                        log.warn("Halting leader-label reconcile: leadership no longer confirmed " +
+                                 "(was leaderPod={}, {} pods updated before ownership was lost)",
+                                 selfPodName,
+                                 updated);
+                        return;
+                    }
+                    if (updatePodLeaderLabel(namespace, podName, isLeader)) {
+                        updated++;
+                    } else {
+                        failures++;
+                    }
                 }
-                if (!stillLeader.getAsBoolean()) {
-                    log.warn("Halting leader-label reconcile: leadership no longer confirmed " +
-                             "(was leaderPod={}, {} pods updated before ownership was lost)", selfPodName, updated);
+
+                continueToken = page
+                        .getMetadata()
+                        .getContinue();
+                if (StringUtils.hasText(continueToken) && !stillLeader.getAsBoolean()) {
+                    log.warn("Halting leader-label reconcile: leadership no longer confirmed before fetching " +
+                             "next page ({} pods updated so far)", updated);
                     return;
                 }
-                if (updatePodLeaderLabel(namespace, podName, isLeader)) {
-                    updated++;
-                } else {
-                    failures++;
-                }
-            }
+            } while (StringUtils.hasText(continueToken));
 
             if (updated > 0 || failures > 0) {
                 log.info("Reconciled leader labels: {} updated, {} failed ({} pods total, leaderPod={})",
                          updated,
                          failures,
-                         pods.size(),
+                         total,
                          selfPodName);
             }
         } catch (final KubernetesClientException e) {
             log.error("Failed to list pods while reconciling leader labels; will retry on next reconcile", e);
         }
-    }
-
-    // Paginated so a single API call never has to serialize an unbounded number of matching pods -
-    // an attacker who can create pods carrying this app's selector label could otherwise inflate a
-    // single unpaginated list() call past K8sClientConfiguration's 2s request timeout, silently
-    // skipping this entire reconcile cycle (caught by the KubernetesClientException handler below).
-    //
-    // An inflated matching-pod count could just as easily turn *this* loop into an unbounded run of
-    // sequential page fetches, all buffered before the patch loop's first stillLeader check - stalling
-    // the single scheduler thread past renewDeadline (or even leaseDuration) and forcing leadership
-    // loss, which is the opposite of what pagination is for. Re-checking stillLeader before each
-    // subsequent page closes that: it halts pagination the moment ownership is actually lost (same as
-    // the patch loop), and on every other call it renews the Redis lease as a side effect (see
-    // ElectorService#stillOwnsLock), so a long-but-still-legitimate multi-page listing keeps the lease
-    // alive instead of racing it. Only checked when another page remains, so the common single-page
-    // case issues no extra Redis call.
-    private List<Pod> listMatchingPods(final String namespace, final BooleanSupplier stillLeader) {
-        final List<Pod> pods = new ArrayList<>();
-        String continueToken = null;
-        do {
-            final PodList page = kubernetesClient
-                    .pods()
-                    .inNamespace(namespace)
-                    .withLabel(electorProperties.getSelectorLabelKey(), electorProperties.getSelectorLabelValue())
-                    .list(new ListOptionsBuilder()
-                                  .withLimit(RECONCILE_LIST_PAGE_SIZE)
-                                  .withContinue(continueToken)
-                                  .build());
-            pods.addAll(page.getItems());
-            continueToken = page
-                    .getMetadata()
-                    .getContinue();
-            if (StringUtils.hasText(continueToken) && !stillLeader.getAsBoolean()) {
-                log.warn("Halting pod-list pagination: leadership no longer confirmed " +
-                         "({} pods collected before ownership was lost)", pods.size());
-                return pods;
-            }
-        } while (StringUtils.hasText(continueToken));
-        return pods;
     }
 
     private boolean needsLabelUpdate(final Pod pod, final boolean isLeader) {

@@ -329,23 +329,25 @@ class LockCallbacksTest {
     }
 
     @Test
-    void reconcileLeaderLabels_shouldStopPaginatingOnceOwnershipLostMidList() {
-        // Given: the selector matches enough pods to span two pages, but ownership is lost right
-        // after the first page comes back - before a second page is ever fetched.
+    void reconcileLeaderLabels_shouldStopPaginatingOnceOwnershipLostBetweenPages() {
+        // Given: page 1 has no drifted pods (so the per-pod stillLeader check inside the patch loop
+        // never fires), but the selector matches enough pods to span a second page. Ownership is lost
+        // before that second page is fetched.
         final PodList page1 = mock(PodList.class);
         final ListMeta page1Meta = new ListMeta();
         page1Meta.setContinue("page-2-token");
-        when(page1.getItems()).thenReturn(List.of(podWithLabel(SELF_POD_NAME, "false")));
+        when(page1.getItems()).thenReturn(List.of(podWithLabel("pod-2", "false")));
         when(page1.getMetadata()).thenReturn(page1Meta);
 
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
         when(labeledPods.list(any(ListOptions.class))).thenReturn(page1);
 
-        // When: the ownership recheck between pages fails.
+        // When: the ownership recheck before fetching page 2 fails.
         lockCallbacks.reconcileLeaderLabels(() -> false);
 
-        // Then: only the first page was fetched, and the drifted pod from that page was never
-        // patched either (reconcileLeaderLabels' own patch-loop check catches it independently).
+        // Then: only the first page was fetched - pagination halted before a second page was ever
+        // requested. (Page 1 had nothing to patch, so this isolates the between-page check rather
+        // than the patch loop's own per-pod check.)
         verify(labeledPods).list(any(ListOptions.class));
         verify(namespacedPods, never()).withName(any(String.class));
     }
