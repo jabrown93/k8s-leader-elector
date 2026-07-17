@@ -1,7 +1,9 @@
 package io.jaredbrown.k8s.leader.elector;
 
+import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.base.PatchContext;
@@ -14,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
@@ -22,6 +25,13 @@ import java.util.function.BooleanSupplier;
 @Component
 @RequiredArgsConstructor
 public class LockCallbacks {
+    // Matches client-go's own default chunk size for paginated list calls. Transparent at this
+    // app's realistic scale (single digits to low tens of matching pods per selector - one page
+    // covers it, same as an unpaginated list()); it only starts mattering under an attacker-
+    // inflated matching-pod count, keeping each individual list call small enough to stay well
+    // inside K8sClientConfiguration's 2s request timeout regardless of total matching pod count.
+    private static final long RECONCILE_LIST_PAGE_SIZE = 500;
+
     @Nonnull
     private final ElectorProperties electorProperties;
     @Nonnull
@@ -66,12 +76,7 @@ public class LockCallbacks {
     public void reconcileLeaderLabels(final BooleanSupplier stillLeader) {
         final String namespace = kubernetesClient.getNamespace();
         try {
-            final List<Pod> pods = kubernetesClient
-                    .pods()
-                    .inNamespace(namespace)
-                    .withLabel(electorProperties.getSelectorLabelKey(), electorProperties.getSelectorLabelValue())
-                    .list()
-                    .getItems();
+            final List<Pod> pods = listMatchingPods(namespace);
 
             int updated = 0;
             int failures = 0;
@@ -106,6 +111,30 @@ public class LockCallbacks {
         } catch (final KubernetesClientException e) {
             log.error("Failed to list pods while reconciling leader labels; will retry on next reconcile", e);
         }
+    }
+
+    // Paginated so a single API call never has to serialize an unbounded number of matching pods -
+    // an attacker who can create pods carrying this app's selector label could otherwise inflate a
+    // single unpaginated list() call past K8sClientConfiguration's 2s request timeout, silently
+    // skipping this entire reconcile cycle (caught by the KubernetesClientException handler below).
+    private List<Pod> listMatchingPods(final String namespace) {
+        final List<Pod> pods = new ArrayList<>();
+        String continueToken = null;
+        do {
+            final PodList page = kubernetesClient
+                    .pods()
+                    .inNamespace(namespace)
+                    .withLabel(electorProperties.getSelectorLabelKey(), electorProperties.getSelectorLabelValue())
+                    .list(new ListOptionsBuilder()
+                                  .withLimit(RECONCILE_LIST_PAGE_SIZE)
+                                  .withContinue(continueToken)
+                                  .build());
+            pods.addAll(page.getItems());
+            continueToken = page
+                    .getMetadata()
+                    .getContinue();
+        } while (StringUtils.hasText(continueToken));
+        return pods;
     }
 
     private boolean needsLabelUpdate(final Pod pod, final boolean isLeader) {
