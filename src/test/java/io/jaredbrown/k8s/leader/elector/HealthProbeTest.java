@@ -1,6 +1,9 @@
 package io.jaredbrown.k8s.leader.elector;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
@@ -13,6 +16,7 @@ import java.nio.file.attribute.FileTime;
 import java.time.Duration;
 import java.time.Instant;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
@@ -88,12 +92,41 @@ class HealthProbeTest {
     }
 
     @Test
-    void isHealthy_returnsFalseWhenReadThrows() throws IOException {
-        // A directory passes the isReadable() and freshness checks but Files.readString() throws
-        // IOException on it, exercising the catch block that reports unhealthy rather than
-        // propagating (e.g. the status file is deleted or replaced by a directory mid-read).
+    void isHealthy_returnsFalseWhenPathIsDirectory() throws IOException {
+        // A directory is rejected by the isRegularFile() guard before any read is attempted.
         final Path directory = Files.createDirectory(tempDir.resolve("not-a-file"));
         enabled(directory, Duration.ZERO);
+
+        assertFalse(new HealthProbe(electorProperties).isHealthy());
+    }
+
+    @Test
+    void isHealthy_returnsFalseWhenPathIsSymlink() throws IOException {
+        // isRegularFile(path, NOFOLLOW_LINKS) rejects the symlink itself, even when its target is a
+        // fresh, healthy regular file — this prevents a symlink planted at the configured path from
+        // redirecting the read to an arbitrary file the elector process can access.
+        final Path target = writeStatus("healthy");
+        final Path symlink = Files.createSymbolicLink(tempDir.resolve("status-link"), target);
+        enabled(symlink, Duration.ofMinutes(2));
+
+        assertFalse(new HealthProbe(electorProperties).isHealthy());
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    @Timeout(5)
+    void isHealthy_returnsFalseWhenPathIsFifoWithoutBlocking() throws IOException, InterruptedException {
+        // A FIFO passes a naive isReadable()/mtime check and blocks indefinitely on open for
+        // reading if no writer is attached. isRegularFile() must reject it before any read is
+        // attempted, so this call returns promptly instead of wedging the caller's thread.
+        final Path fifo = tempDir.resolve("status-fifo");
+        assertEquals(0, new ProcessBuilder("mkfifo", fifo
+                .toAbsolutePath()
+                .toString())
+                .inheritIO()
+                .start()
+                .waitFor());
+        enabled(fifo, Duration.ofMinutes(2));
 
         assertFalse(new HealthProbe(electorProperties).isHealthy());
     }

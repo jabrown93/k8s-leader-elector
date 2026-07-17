@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -19,12 +20,19 @@ import java.time.Instant;
  * reads it. A missing, stale, or non-healthy file is reported as unhealthy. When the probe is
  * disabled the pod is always considered healthy, so a probe-less elector is unchanged.
  *
- * <p><b>Writer contract:</b> {@link #isHealthy()} checks readability, freshness, and content in
- * three separate filesystem calls, not one atomic read. The writer must therefore write to a
+ * <p><b>Writer contract:</b> {@link #isHealthy()} checks file type, readability, freshness, and
+ * content in separate filesystem calls, not one atomic read. The writer must therefore write to a
  * temporary file in the same directory and atomically rename it into place (e.g.
  * {@code Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE)}), never write the target path
  * in place - otherwise this probe can observe a partially-written file and report a spurious,
  * transient "unhealthy".
+ *
+ * <p><b>File type:</b> only a regular file (not a symlink) is accepted — anything else, including
+ * a FIFO, socket, device file, directory, or symlink, is reported unhealthy without being opened.
+ * This keeps a co-located writer from wedging the elector's single scheduler thread on a blocking
+ * FIFO open, and keeps a symlink from redirecting the read to an arbitrary file the elector process
+ * can access. On a content mismatch, only a fixed message is logged, never the file's raw content,
+ * so this probe cannot be used to exfiltrate file contents into application logs.
  */
 @Slf4j
 @Component
@@ -51,8 +59,13 @@ public class HealthProbe {
 
         final Path path = Path.of(filePath);
         try {
+            if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                log.warn("Health status file {} is missing or not a regular file; reporting unhealthy", filePath);
+                return false;
+            }
+
             if (!Files.isReadable(path)) {
-                log.warn("Health status file {} is missing or unreadable; reporting unhealthy", filePath);
+                log.warn("Health status file {} is not readable; reporting unhealthy", filePath);
                 return false;
             }
 
@@ -76,10 +89,8 @@ public class HealthProbe {
                     .trim();
             final boolean healthy = content.equals(electorProperties.getHealthProbeHealthyContent());
             if (!healthy) {
-                log.warn("Health status file {} content '{}' != '{}'; reporting unhealthy",
-                         filePath,
-                         content,
-                         electorProperties.getHealthProbeHealthyContent());
+                log.warn("Health status file {} content did not match the configured healthy value; "
+                         + "reporting unhealthy", filePath);
             }
             return healthy;
         } catch (final IOException e) {
