@@ -3,6 +3,15 @@ name: Version release
 on:
   push:
     branches: [ main, beta ]
+  # Weekly roll-up of the fix(deps) commits that .releaserc.js suppresses on
+  # push, promoted into a single patch release. GitHub only fires schedule
+  # from the default branch, so this sweeps main only; use the manual trigger
+  # below to sweep beta.
+  schedule:
+    - cron: '0 9 * * 1' # Mondays 09:00 UTC — weekly dependency roll-up
+  # Also sets RELEASE_DEPS, so a manual run is an on-demand dependency sweep
+  # (and the only way to promote beta's suppressed fix(deps) commits).
+  workflow_dispatch: {}
 
 # One version-release attempt per branch at a time.
 concurrency:
@@ -86,6 +95,14 @@ jobs:
       id: release
       env:
         GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        # Read by .releaserc.js to promote the fix(deps) commits it suppresses
+        # on push into a single patch release. Set on the weekly schedule, and
+        # on workflow_dispatch so a manual run is an on-demand sweep (the only
+        # way to reach beta, which schedule cannot trigger). This repo sets the
+        # var itself rather than inheriting it from jabrown93/.github's
+        # npm-release.yml/docker-release.yml, since it runs semantic-release
+        # directly. Keep the expression in sync with those workflows.
+        RELEASE_DEPS: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
       run: npx semantic-release
 
     # A squash merge of main -> beta does NOT make main's commits (or their
