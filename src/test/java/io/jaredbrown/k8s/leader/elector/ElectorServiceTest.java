@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -642,7 +643,8 @@ class ElectorServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void stillOwnsLock_shouldRenewAndReturnTrueWhenStillOwned() {
-        // Given: this pod currently holds the lock.
+        // Given: this pod is running and currently holds the lock.
+        ((AtomicBoolean) ReflectionTestUtils.getField(electorService, "running")).set(true);
         ((AtomicReference<DistributedLock>) ReflectionTestUtils.getField(electorService, "lock")).set(lock);
 
         // When/Then: a successful renew confirms Redis still maps the key to this client, and refreshes
@@ -656,6 +658,7 @@ class ElectorServiceTest {
     void stillOwnsLock_shouldReturnFalseWhenRenewRejected() {
         // Given: this pod thinks it holds the lock, but Redis has already handed it to another pod, so
         // renewLock's Lua script fails to match this client id and the registry throws.
+        ((AtomicBoolean) ReflectionTestUtils.getField(electorService, "running")).set(true);
         ((AtomicReference<DistributedLock>) ReflectionTestUtils.getField(electorService, "lock")).set(lock);
         doThrow(new IllegalStateException("Could not renew mutex at test-lock"))
                 .when(lockRegistry)
@@ -663,6 +666,21 @@ class ElectorServiceTest {
 
         // When/Then: treated as ownership lost, so a mid-flight reconcile will stop stamping labels.
         assertFalse(electorService.stillOwnsLock());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void stillOwnsLock_shouldReturnFalseAndSkipRedisWhenNotRunning() {
+        // Given: shutdown has begun (stop() sets running=false before anything else) while this pod
+        // still legitimately holds the lock.
+        ((AtomicReference<DistributedLock>) ReflectionTestUtils.getField(electorService, "lock")).set(lock);
+
+        // When/Then: a reconcile mid-pagination must stop here rather than keep renewing the lease -
+        // this is the only interruption path for the acquisition-time reconcile (becomeLeader ->
+        // onLockAcquired), which runs before scheduleRefreshTask() creates refreshFuture for
+        // cancelRefreshTask() to cancel.
+        assertFalse(electorService.stillOwnsLock());
+        verify(lockRegistry, never()).renewLock(anyString(), any(Duration.class));
     }
 
     @Test

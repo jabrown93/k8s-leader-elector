@@ -1,5 +1,7 @@
 package io.jaredbrown.k8s.leader.elector;
 
+import io.fabric8.kubernetes.api.model.ListMeta;
+import io.fabric8.kubernetes.api.model.ListOptions;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodList;
@@ -31,6 +33,7 @@ import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -78,6 +81,11 @@ class LockCallbacksTest {
         lenient()
                 .when(podsOperation.inNamespace(NAMESPACE))
                 .thenReturn(namespacedPods);
+        // Single-page default: no continuation token, so listMatchingPods() stops after one call
+        // unless a test explicitly overrides getMetadata() to exercise pagination itself.
+        lenient()
+                .when(podList.getMetadata())
+                .thenReturn(new ListMeta());
     }
 
     @Test
@@ -108,7 +116,7 @@ class LockCallbacksTest {
         final Pod followerPod = pod("pod-2");
 
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
-        when(labeledPods.list()).thenReturn(podList);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(podList);
         when(podList.getItems()).thenReturn(List.of(leaderPod, followerPod));
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(leaderPodResource);
         when(namespacedPods.withName("pod-2")).thenReturn(followerPodResource);
@@ -118,7 +126,7 @@ class LockCallbacksTest {
 
         // Then
         verify(namespacedPods).withLabel("app", APP_NAME);
-        verify(labeledPods).list();
+        verify(labeledPods).list(any(ListOptions.class));
 
         final ArgumentCaptor<PatchContext> patchContextCaptor = ArgumentCaptor.forClass(PatchContext.class);
         final ArgumentCaptor<Pod> leaderPatchCaptor = ArgumentCaptor.forClass(Pod.class);
@@ -149,7 +157,7 @@ class LockCallbacksTest {
         final Pod followerPod = podWithLabel("pod-2", "false");
 
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
-        when(labeledPods.list()).thenReturn(podList);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(podList);
         when(podList.getItems()).thenReturn(List.of(leaderPod, followerPod));
 
         // When
@@ -167,7 +175,7 @@ class LockCallbacksTest {
         final Pod stalePeerPod = podWithLabel("pod-2", "true");
 
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
-        when(labeledPods.list()).thenReturn(podList);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(podList);
         when(podList.getItems()).thenReturn(List.of(leaderPod, stalePeerPod));
         when(namespacedPods.withName("pod-2")).thenReturn(peerPodResource);
 
@@ -186,7 +194,7 @@ class LockCallbacksTest {
         final Pod peerPod = podWithLabel("pod-2", "true");          // drifted: should be false
 
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
-        when(labeledPods.list()).thenReturn(podList);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(podList);
         when(podList.getItems()).thenReturn(List.of(leaderPod, peerPod));
 
         // When: the ownership recheck fails before the first mutation.
@@ -205,7 +213,7 @@ class LockCallbacksTest {
         final Pod peerPod = podWithLabel("pod-2", "true");
 
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
-        when(labeledPods.list()).thenReturn(podList);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(podList);
         when(podList.getItems()).thenReturn(List.of(leaderPod, peerPod));
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(leaderPodResource);
         when(namespacedPods.withName("pod-2")).thenReturn(peerPodResource);
@@ -232,7 +240,7 @@ class LockCallbacksTest {
         final Pod peerPod = podWithLabel("pod-2", "true");
 
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
-        when(labeledPods.list()).thenReturn(podList);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(podList);
         when(podList.getItems()).thenReturn(List.of(leaderPod, peerPod));
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(leaderPodResource);
 
@@ -258,7 +266,7 @@ class LockCallbacksTest {
                 .setLabels(null);
 
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
-        when(labeledPods.list()).thenReturn(podList);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(podList);
         when(podList.getItems()).thenReturn(List.of(podWithNoLabels));
         when(namespacedPods.withName("pod-2")).thenReturn(podResource);
 
@@ -273,11 +281,75 @@ class LockCallbacksTest {
     void reconcileLeaderLabels_shouldNotThrowWhenPodListQueryFails() {
         // Given
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
-        when(labeledPods.list()).thenThrow(new KubernetesClientException("Failed to list pods"));
+        when(labeledPods.list(any(ListOptions.class))).thenThrow(new KubernetesClientException("Failed to list pods"));
 
         // When/Then: a transient API failure must not cost leadership; the next renewal-tick
         // reconcile (ElectorService#refreshLock) retries automatically.
         assertDoesNotThrow(() -> lockCallbacks.reconcileLeaderLabels(() -> true));
+    }
+
+    @Test
+    void reconcileLeaderLabels_shouldFollowContinuationTokenAcrossPages() {
+        // Given: the selector matches more pods than fit in one page (e.g. an inflated matching-pod
+        // count), so the API server splits the response across two pages via a continuation token.
+        final PodList page1 = mock(PodList.class);
+        final PodList page2 = mock(PodList.class);
+        final ListMeta page1Meta = new ListMeta();
+        page1Meta.setContinue("page-2-token");
+        when(page1.getItems()).thenReturn(List.of(podWithLabel(SELF_POD_NAME, "true"), podWithLabel("pod-2", "true")));
+        when(page1.getMetadata()).thenReturn(page1Meta);
+        when(page2.getItems()).thenReturn(List.of(podWithLabel("pod-3", "true")));
+        when(page2.getMetadata()).thenReturn(new ListMeta());
+
+        final PodResource pod2Resource = mock(PodResource.class);
+        final PodResource pod3Resource = mock(PodResource.class);
+        when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(page1, page2);
+        when(namespacedPods.withName("pod-2")).thenReturn(pod2Resource);
+        when(namespacedPods.withName("pod-3")).thenReturn(pod3Resource);
+
+        // When
+        lockCallbacks.reconcileLeaderLabels(() -> true);
+
+        // Then: a second page was fetched using the first page's continuation token, and pods from
+        // both pages were reconciled (self already correct, pod-2 and pod-3 both drifted).
+        final ArgumentCaptor<ListOptions> optionsCaptor = ArgumentCaptor.forClass(ListOptions.class);
+        verify(labeledPods, times(2)).list(optionsCaptor.capture());
+        assertNull(optionsCaptor
+                           .getAllValues()
+                           .get(0)
+                           .getContinue());
+        assertEquals("page-2-token", optionsCaptor
+                .getAllValues()
+                .get(1)
+                .getContinue());
+        verify(namespacedPods, never()).withName(SELF_POD_NAME);
+        verify(pod2Resource).patch(any(PatchContext.class), any(Pod.class));
+        verify(pod3Resource).patch(any(PatchContext.class), any(Pod.class));
+    }
+
+    @Test
+    void reconcileLeaderLabels_shouldStopPaginatingOnceOwnershipLostBetweenPages() {
+        // Given: page 1 has no drifted pods (so the per-pod stillLeader check inside the patch loop
+        // never fires), but the selector matches enough pods to span a second page. Ownership is lost
+        // before that second page is fetched.
+        final PodList page1 = mock(PodList.class);
+        final ListMeta page1Meta = new ListMeta();
+        page1Meta.setContinue("page-2-token");
+        when(page1.getItems()).thenReturn(List.of(podWithLabel("pod-2", "false")));
+        when(page1.getMetadata()).thenReturn(page1Meta);
+
+        when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(page1);
+
+        // When: the ownership recheck before fetching page 2 fails.
+        lockCallbacks.reconcileLeaderLabels(() -> false);
+
+        // Then: only the first page was fetched - pagination halted before a second page was ever
+        // requested. (Page 1 had nothing to patch, so this isolates the between-page check rather
+        // than the patch loop's own per-pod check.)
+        verify(labeledPods).list(any(ListOptions.class));
+        verify(namespacedPods, never()).withName(any(String.class));
     }
 
     @Test
@@ -298,7 +370,7 @@ class LockCallbacksTest {
         // Given
         final PodResource leaderPodResource = mock(PodResource.class);
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
-        when(labeledPods.list()).thenReturn(podList);
+        when(labeledPods.list(any(ListOptions.class))).thenReturn(podList);
         when(podList.getItems()).thenReturn(List.of(pod(SELF_POD_NAME)));
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(leaderPodResource);
         when(leaderPodResource.patch(any(PatchContext.class), any(Pod.class)))
