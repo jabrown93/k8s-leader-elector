@@ -58,6 +58,10 @@ public class HealthProbe {
 
     private volatile ExecutorService fileReadExecutor = newFileReadExecutor();
 
+    /**
+     * @return a fresh single-thread daemon executor dedicated to the bounded file read described
+     * in this class's read-timeout note
+     */
     private static ExecutorService newFileReadExecutor() {
         return Executors.newSingleThreadExecutor(runnable -> {
             final Thread thread = new Thread(runnable, "health-probe-file-read");
@@ -66,6 +70,7 @@ public class HealthProbe {
         });
     }
 
+    /** Stops the background read executor on application shutdown. */
     @PreDestroy
     void shutdown() {
         fileReadExecutor.shutdownNow();
