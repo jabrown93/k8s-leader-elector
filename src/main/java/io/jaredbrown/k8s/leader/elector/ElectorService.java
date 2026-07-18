@@ -20,6 +20,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * Drives distributed leader election over a Redis-backed {@link RedisLockRegistry}, keeping pod
+ * leader labels in sync via {@link LockCallbacks}.
+ *
+ * <p>Acquisition, renewal, and release all run on {@code taskScheduler}'s single thread (see that
+ * bean's Javadoc for why); optional health gating and a deadlock-grace escape hatch are described
+ * on {@link #lockLoop} and {@link #deadlockGraceExceeded}.
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -54,18 +62,22 @@ public class ElectorService implements SmartLifecycle {
     // Consecutive health-probe failures observed while already leading.
     private final AtomicInteger consecutiveProbeFailures = new AtomicInteger(0);
 
+    /**
+     * Labels self {@code leader=false} (so a freshly (re)created pod carries the label from boot
+     * rather than staying unlabeled until it wins or loses its first election), then schedules the
+     * first {@link #lockLoop} run.
+     */
     @Override
     public void start() {
         running.set(true);
         deadlockSince.set(null);
         consecutiveProbeFailures.set(0);
         log.info("Starting ElectorService");
-        // So a freshly (re)created pod carries the label from boot rather than staying unlabeled
-        // until it wins or loses its first election.
         callbacks.ensureSelfLabeled();
         taskScheduler.schedule(this::lockLoop, clock.instant());
     }
 
+    /** Cancels lock renewal and releases the lock (if held); see {@link #awaitLockRelease}. */
     @Override
     public void stop() {
         log.info("Stopping ElectorService");
@@ -79,12 +91,14 @@ public class ElectorService implements SmartLifecycle {
         return running.get();
     }
 
+    /** Delegates to {@link #stop()} so shutdown releases the lock even outside a normal Spring stop. */
     @PreDestroy
     public void onDestroy() {
         log.info("@PreDestroy: releasing lock if held");
         stop();
     }
 
+    /** Cancels the scheduled renewal task, if one is running. */
     private void cancelRefreshTask() {
         final ScheduledFuture<?> future = refreshFuture.getAndSet(null);
         if (future != null && !future.isCancelled()) {
@@ -92,12 +106,17 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
-    // DistributedLock.unlock() is thread-owned (RedisLockRegistry.RedisLock wraps a local
-    // ReentrantLock and throws IllegalStateException if unlocked off-thread). Acquisition always
-    // happens on the taskScheduler thread (lockLoop/refreshLock), but SmartLifecycle#stop() runs on
-    // whatever thread Spring's context shutdown uses, so releasing directly here would always fail
-    // and leak the Redis key for the full lease TTL. Route the release through the scheduler thread
-    // instead and wait briefly for it to finish.
+    /**
+     * Routes the shutdown-time lock release onto the scheduler thread and waits up to
+     * {@link #RELEASE_TIMEOUT} for it to finish.
+     *
+     * <p>{@code DistributedLock.unlock()} is thread-owned ({@code RedisLockRegistry.RedisLock}
+     * wraps a local {@code ReentrantLock} and throws {@code IllegalStateException} if unlocked
+     * off-thread). Acquisition always happens on the {@code taskScheduler} thread ({@code
+     * lockLoop}/{@code refreshLock}), but {@code SmartLifecycle#stop()} runs on whatever thread
+     * Spring's context shutdown uses, so releasing directly here would always fail and leak the
+     * Redis key for the full lease TTL.
+     */
     private void awaitLockRelease() {
         try {
             taskScheduler
@@ -113,8 +132,10 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
-    // Runs on the scheduler thread (see awaitLockRelease). Only a pod that was actually leading
-    // needs its label cleared here - a non-leader pod's label is already false.
+    /**
+     * Runs on the scheduler thread (see {@link #awaitLockRelease}). Only a pod that was actually
+     * leading needs its label cleared here - a non-leader pod's label is already false.
+     */
     private void releaseLockAndClearLabelIfHeld() {
         if (releaseLockIfHeld()) {
             callbacks.onShutdown();
@@ -123,8 +144,10 @@ public class ElectorService implements SmartLifecycle {
 
     // --- Refresh logic: interval is configurable via electorProperties.getRenewDeadline() ---
 
-    // Returns whether this pod was holding the lock (i.e. was leader), regardless of whether the
-    // unlock call itself succeeded.
+    /**
+     * @return whether this pod was holding the lock (i.e. was leader), regardless of whether the
+     * unlock call itself succeeded
+     */
     private boolean releaseLockIfHeld() {
         final DistributedLock currentLock = lock.getAndSet(null);
         if (currentLock != null) {
@@ -139,6 +162,13 @@ public class ElectorService implements SmartLifecycle {
         return false;
     }
 
+    /**
+     * Attempts lock acquisition, gated by the health probe: an unhealthy pod that still acquires
+     * the (free) lock releases it again and backs off (see {@link #scheduleUnhealthyRetry}), unless
+     * {@link #deadlockGraceExceeded} says every candidate has been unhealthy long enough to lead in
+     * a degraded state anyway. Reschedules itself via {@link #scheduleRetry} or {@link
+     * #scheduleUnhealthyRetry} on every path that doesn't lead to {@link #becomeLeader}.
+     */
     private void lockLoop() {
         if (!running.get()) {
             return;
@@ -220,6 +250,10 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
+    /**
+     * Takes ownership of {@code newLock}, reconciles leader labels, and schedules renewal. Releases
+     * the lock and retries instead if the post-acquire callback fails.
+     */
     private void becomeLeader(final DistributedLock newLock) {
         // Acquiring leadership ends any current free-lock standoff, so the deadlock-grace window
         // must start fresh next time. Resetting here (rather than only on the healthy path) stops a
@@ -241,8 +275,11 @@ public class ElectorService implements SmartLifecycle {
         scheduleRefreshTask();
     }
 
-    // True once the lock has been observed free-but-this-pod-unhealthy for at least the configured
-    // grace. Starts the timer on first such observation (returning false then).
+    /**
+     * @return {@code true} once the lock has been observed free-but-this-pod-unhealthy for at
+     * least the configured grace. Starts the timer on first such observation (returning
+     * {@code false} then).
+     */
     private boolean deadlockGraceExceeded() {
         final Instant now = clock.instant();
         final Instant witness = deadlockSince.compareAndExchange(null, now);
@@ -252,6 +289,7 @@ public class ElectorService implements SmartLifecycle {
                        .compareTo(electorProperties.getHealthProbeDeadlockGrace()) >= 0;
     }
 
+    /** Reschedules {@link #lockLoop} after {@code retryPeriod}, if still running. */
     private void scheduleRetry() {
         if (running.get()) {
             taskScheduler.schedule(this::lockLoop,
@@ -261,8 +299,11 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
-    // Re-probe schedule for an UNHEALTHY pod: a longer backoff than retryPeriod so it stops
-    // contending for the lock every few seconds and lets healthy peers take over (see lockLoop).
+    /**
+     * Re-probe schedule for an unhealthy pod: a longer backoff than {@code retryPeriod} so it stops
+     * contending for the lock every few seconds and lets healthy peers take over (see
+     * {@link #lockLoop}).
+     */
     private void scheduleUnhealthyRetry() {
         if (running.get()) {
             taskScheduler.schedule(this::lockLoop,
@@ -274,6 +315,7 @@ public class ElectorService implements SmartLifecycle {
 
     // --- Lock lost handling & reacquire ---
 
+    /** Cancels any existing renewal task and schedules {@link #refreshLock} at {@code renewDeadline}. */
     private void scheduleRefreshTask() {
         cancelRefreshTask();
         final ScheduledFuture<?> future = taskScheduler.scheduleAtFixedRate(this::refreshLock,
@@ -284,6 +326,11 @@ public class ElectorService implements SmartLifecycle {
         refreshFuture.set(future);
     }
 
+    /**
+     * Runs on every renewal tick: relinquishes leadership if the health probe has failed
+     * {@code healthProbeFailureThreshold} consecutive times, otherwise renews the lock (with one
+     * immediate retry; see {@link #renewLockWithRetry}) and reconciles leader labels.
+     */
     private void refreshLock() {
         if (!running.get()) {
             handleLockLost();
@@ -325,9 +372,12 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
-    // A single transient Redis blip should not cost leadership outright: renewDeadline (60s
-    // default) leaves ample slack before the lease (120s default) actually expires, so one
-    // immediate retry absorbs a blip that would otherwise trigger a full re-election.
+    /**
+     * Renews the lock, retrying once immediately on failure before propagating. A single transient
+     * Redis blip should not cost leadership outright: {@code renewDeadline} (60s default) leaves
+     * ample slack before the lease (120s default) actually expires, so one immediate retry absorbs
+     * a blip that would otherwise trigger a full re-election.
+     */
     private void renewLockWithRetry() {
         try {
             renewLockOnce();
@@ -339,6 +389,7 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
+    /** Extends the lock's Redis TTL by {@code leaseDuration}; throws on failure. */
     private void renewLockOnce() {
         lockRegistry.renewLock(electorProperties.getLockName(), electorProperties.getLeaseDuration());
         log.debug("Lock TTL extended by {} seconds",
@@ -347,20 +398,26 @@ public class ElectorService implements SmartLifecycle {
                           .get(ChronoUnit.SECONDS));
     }
 
-    // Re-confirms this pod still holds the Redis lock, and refreshes its lease as a side effect.
-    // Passed into LockCallbacks#reconcileLeaderLabels so a long-running label reconcile stops the
-    // moment ownership is lost instead of stamping stale labels. renewLock's Lua script only extends
-    // the key while Redis still maps it to THIS registry's client id, so a thrown/false result is a
-    // genuine "no longer the owner" signal (a lapsed lease another pod already took), not just local
-    // state — a purely local check can't see a Redis-side takeover. Runs on the scheduler thread, the
-    // same thread as the reconcile that calls it.
-    //
-    // Also gates on running: renewLock alone would keep succeeding straight through shutdown, letting
-    // a reconcile spanning many pod-list pages stall the single scheduler thread well past stop()'s 5s
-    // RELEASE_TIMEOUT. This matters most for the acquisition-time reconcile (becomeLeader ->
-    // onLockAcquired), which runs before scheduleRefreshTask() creates refreshFuture — cancelRefreshTask()
-    // has nothing to interrupt yet at that point, so this running check is the only thing that can cut a
-    // long reconcile short once stop() has fired, letting the queued lock-release task run promptly.
+    /**
+     * Re-confirms this pod still holds the Redis lock, and refreshes its lease as a side effect.
+     * Passed into {@code LockCallbacks#reconcileLeaderLabels} so a long-running label reconcile
+     * stops the moment ownership is lost instead of stamping stale labels. {@code renewLock}'s Lua
+     * script only extends the key while Redis still maps it to THIS registry's client id, so a
+     * thrown/false result is a genuine "no longer the owner" signal (a lapsed lease another pod
+     * already took), not just local state — a purely local check can't see a Redis-side takeover.
+     * Runs on the scheduler thread, the same thread as the reconcile that calls it.
+     *
+     * <p>Also gates on {@code running}: {@code renewLock} alone would keep succeeding straight
+     * through shutdown, letting a reconcile spanning many pod-list pages stall the single scheduler
+     * thread well past {@code stop()}'s 5s {@link #RELEASE_TIMEOUT}. This matters most for the
+     * acquisition-time reconcile ({@code becomeLeader -> onLockAcquired}), which runs before
+     * {@link #scheduleRefreshTask()} creates {@code refreshFuture} — {@link #cancelRefreshTask()}
+     * has nothing to interrupt yet at that point, so this running check is the only thing that can
+     * cut a long reconcile short once {@code stop()} has fired, letting the queued lock-release
+     * task run promptly.
+     *
+     * @return whether this pod's ownership of the lock was confirmed
+     */
     boolean stillOwnsLock() {
         if (!running.get() || lock.get() == null) {
             return false;
@@ -376,6 +433,7 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
+    /** Cancels renewal, releases the lock, notifies {@link LockCallbacks#onLockLost()}, and re-enters acquisition if still running. */
     private void handleLockLost() {
         cancelRefreshTask();
         releaseLockIfHeld();
@@ -389,6 +447,7 @@ public class ElectorService implements SmartLifecycle {
         }
     }
 
+    /** @return {@link Integer#MIN_VALUE} so this service starts as early as possible. */
     @Override
     public int getPhase() {
         return Integer.MIN_VALUE;

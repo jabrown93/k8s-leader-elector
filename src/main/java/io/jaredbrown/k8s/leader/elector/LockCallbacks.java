@@ -19,6 +19,10 @@ import org.springframework.util.StringUtils;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
 
+/**
+ * Callbacks invoked by {@code ElectorService} to keep pod leader labels in sync with the current
+ * election result.
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -42,10 +46,14 @@ public class LockCallbacks {
     @Value("${POD_NAME}")
     private String selfPodName;
 
-    // @Value above only rejects a totally absent property; POD_NAME="" resolves successfully and
-    // would silently reproduce the same bug removing the "unknown" default was meant to fix - every
-    // pod.getMetadata().getName().equals(selfPodName) comparison below would fail, so this pod would
-    // never match "isLeader" even while holding the Redis lock. Fail startup on blank too.
+    /**
+     * Fails startup if {@code POD_NAME} is blank.
+     *
+     * <p>{@code @Value} above only rejects a totally absent property; {@code POD_NAME=""} resolves
+     * successfully and would silently reproduce the same bug removing the "unknown" default was
+     * meant to fix - every {@code pod.getMetadata().getName().equals(selfPodName)} comparison below
+     * would fail, so this pod would never match "isLeader" even while holding the Redis lock.
+     */
     @PostConstruct
     void validateSelfPodName() {
         if (!StringUtils.hasText(selfPodName)) {
@@ -53,37 +61,49 @@ public class LockCallbacks {
         }
     }
 
+    /**
+     * Reconciles leader labels after acquiring the lock.
+     *
+     * @param stillLeader re-confirms leadership mid-reconcile; see {@link #reconcileLeaderLabels}
+     */
     public void onLockAcquired(final BooleanSupplier stillLeader) {
         log.info("Lock acquired - reconciling leader labels across deployment");
         reconcileLeaderLabels(stillLeader);
     }
 
-    // Brings every pod's leader label in line with the current election result: true on self,
-    // false on everyone else. Idempotent (skips pods whose label already matches) and safe to call
-    // repeatedly, so ElectorService also calls this on every successful lock renewal — that self-
-    // heals a label a prior attempt failed to set (a slow API server, a pod created after the last
-    // election) instead of leaving it wrong until the next leadership change. Never throws: a
-    // labeling problem is a side effect of leadership, not a reason to give it up, and the next
-    // renewal tick (at most renewDeadline away) retries automatically.
-    //
-    // Paginated (RECONCILE_LIST_PAGE_SIZE per page, matching client-go's own default chunk size) and
-    // patches each page's drifted pods before fetching the next, rather than buffering the whole
-    // match set first. Both are attacker-inflated-pod-count defenses: an unpaginated list() could
-    // exceed K8sClientConfiguration's 2s request timeout outright, and buffering every page before
-    // patching would leave heap usage unbounded even though each individual request stays small.
-    // Processing page-by-page bounds peak memory to one page's worth of pods regardless of total
-    // match count.
-    //
-    // stillLeader re-confirms leadership (Redis-side; see ElectorService#stillOwnsLock) immediately
-    // before mutating each drifted pod, and again before fetching another page. A reconcile that
-    // outlives the lease — a very slow API server, many drifted pods, or simply many pages — must not
-    // keep stamping this pod's stale identity (or keep paginating at all) after another pod has taken
-    // over the lock: stamping stale labels would flip the new leader's label back to false and leave
-    // the deployment momentarily leaderless, and unconditionally continued pagination could stall the
-    // single scheduler thread past renewDeadline. Every stillLeader call besides the last also renews
-    // the Redis lease as a side effect, so a long-but-still-legitimate multi-page reconcile keeps the
-    // lease alive instead of racing it. The pre-next-page check only fires when another page remains,
-    // so the common single-page case issues no extra Redis call beyond what patching already needs.
+    /**
+     * Brings every pod's leader label in line with the current election result: true on self,
+     * false on everyone else. Idempotent (skips pods whose label already matches) and safe to call
+     * repeatedly, so {@code ElectorService} also calls this on every successful lock renewal — that
+     * self-heals a label a prior attempt failed to set (a slow API server, a pod created after the
+     * last election) instead of leaving it wrong until the next leadership change. Never throws: a
+     * labeling problem is a side effect of leadership, not a reason to give it up, and the next
+     * renewal tick (at most {@code renewDeadline} away) retries automatically.
+     *
+     * <p>Paginated ({@link #RECONCILE_LIST_PAGE_SIZE} per page, matching client-go's own default
+     * chunk size) and patches each page's drifted pods before fetching the next, rather than
+     * buffering the whole match set first. Both are attacker-inflated-pod-count defenses: an
+     * unpaginated {@code list()} could exceed {@code K8sClientConfiguration}'s 2s request timeout
+     * outright, and buffering every page before patching would leave heap usage unbounded even
+     * though each individual request stays small. Processing page-by-page bounds peak memory to
+     * one page's worth of pods regardless of total match count.
+     *
+     * @param stillLeader re-confirms leadership (Redis-side; see {@code
+     *                     ElectorService#stillOwnsLock}) immediately before mutating each drifted
+     *                     pod, and again before fetching another page. A reconcile that outlives
+     *                     the lease — a very slow API server, many drifted pods, or simply many
+     *                     pages — must not keep stamping this pod's stale identity (or keep
+     *                     paginating at all) after another pod has taken over the lock: stamping
+     *                     stale labels would flip the new leader's label back to false and leave
+     *                     the deployment momentarily leaderless, and unconditionally continued
+     *                     pagination could stall the single scheduler thread past
+     *                     {@code renewDeadline}. Every {@code stillLeader} call besides the last
+     *                     also renews the Redis lease as a side effect, so a long-but-still-
+     *                     legitimate multi-page reconcile keeps the lease alive instead of racing
+     *                     it. The pre-next-page check only fires when another page remains, so the
+     *                     common single-page case issues no extra Redis call beyond what patching
+     *                     already needs.
+     */
     public void reconcileLeaderLabels(final BooleanSupplier stillLeader) {
         final String namespace = kubernetesClient.getNamespace();
         try {
@@ -147,6 +167,10 @@ public class LockCallbacks {
         }
     }
 
+    /**
+     * @return whether {@code pod}'s current leader label differs from what {@code isLeader}
+     * implies (including when the pod carries no labels map at all)
+     */
     private boolean needsLabelUpdate(final Pod pod, final boolean isLeader) {
         final Map<String, String> labels = pod
                 .getMetadata()
@@ -157,6 +181,7 @@ public class LockCallbacks {
                 .equals(current);
     }
 
+    /** Patches {@code podName}'s leader label; propagates any {@link KubernetesClientException}. */
     private void patchPodLeaderLabel(final String namespace, final String podName, final boolean isLeader) {
         final Pod patch = new PodBuilder()
                 .withNewMetadata()
@@ -172,6 +197,10 @@ public class LockCallbacks {
         log.debug("Set {}={} on pod {}", electorProperties.getLabelKey(), isLeader, podName);
     }
 
+    /**
+     * @return {@code true} if the patch succeeded; on failure, logs (at error for the leader, warn
+     * otherwise) and returns {@code false} rather than throwing
+     */
     private boolean updatePodLeaderLabel(final String namespace, final String podName, final boolean isLeader) {
         try {
             patchPodLeaderLabel(namespace, podName, isLeader);
@@ -188,23 +217,28 @@ public class LockCallbacks {
         }
     }
 
-    // Called once on startup so a freshly (re)created pod always carries the label from boot
-    // instead of staying unlabeled until it wins (or loses) its first election.
+    /**
+     * Called once on startup so a freshly (re)created pod always carries the label from boot
+     * instead of staying unlabeled until it wins (or loses) its first election.
+     */
     public void ensureSelfLabeled() {
         log.info("Initializing leader label on self at startup");
         updatePodLeaderLabel(kubernetesClient.getNamespace(), selfPodName, false);
     }
 
+    /** Removes the leader label from self after losing the lock. */
     public void onLockLost() {
         log.warn("Lock lost - removing leader label from self");
         updatePodLeaderLabel(kubernetesClient.getNamespace(), selfPodName, false);
     }
 
-    // Called on graceful shutdown, but only for a pod that was actually leading (see
-    // ElectorService#releaseLockAndClearLabelIfHeld) — otherwise the label is already false. Without
-    // this, a departing leader would stay labeled true for the rest of its terminationGracePeriod,
-    // which anything selecting directly on the label (not just the Service, which drops NotReady
-    // endpoints immediately) could still match.
+    /**
+     * Called on graceful shutdown, but only for a pod that was actually leading (see {@code
+     * ElectorService#releaseLockAndClearLabelIfHeld}) — otherwise the label is already false.
+     * Without this, a departing leader would stay labeled true for the rest of its
+     * {@code terminationGracePeriod}, which anything selecting directly on the label (not just the
+     * Service, which drops NotReady endpoints immediately) could still match.
+     */
     public void onShutdown() {
         log.info("Shutting down while leading - removing leader label from self");
         updatePodLeaderLabel(kubernetesClient.getNamespace(), selfPodName, false);
