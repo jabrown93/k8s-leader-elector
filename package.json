@@ -3,7 +3,7 @@
   "private": true,
   "description": "CI-only tooling for conventional-commit versioning; no runtime JS in this repo",
   "devDependencies": {
-    "semantic-release": "25.0.7",
+    "semantic-release": "25.0.8",
     "@semantic-release/changelog": "6.0.3",
     "@semantic-release/commit-analyzer": "13.0.1",
     "@semantic-release/exec": "7.1.0",
