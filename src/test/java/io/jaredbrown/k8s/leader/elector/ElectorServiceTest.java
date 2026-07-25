@@ -78,7 +78,7 @@ class ElectorServiceTest {
                 .when(healthProbe.isHealthy())
                 .thenReturn(true);
 
-        // Default property values (using lenient() for properties that may not be used in all tests)
+        // lenient: not every test exercises every property
         lenient()
                 .when(electorProperties.getLockName())
                 .thenReturn("test-lock");
@@ -145,7 +145,6 @@ class ElectorServiceTest {
 
         electorService.start();
 
-        // Capture and execute the lockLoop runnable
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
@@ -195,7 +194,6 @@ class ElectorServiceTest {
 
         electorService.start();
 
-        // Capture and execute the lockLoop runnable
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
@@ -208,7 +206,6 @@ class ElectorServiceTest {
         verify(lockRegistry).obtain("test-lock");
         verify(lock).tryLock(5L, TimeUnit.SECONDS);
         verify(callbacks, never()).onLockAcquired(any());
-        // Should schedule retry
         verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(Instant.class));
     }
 
@@ -220,7 +217,6 @@ class ElectorServiceTest {
 
         electorService.start();
 
-        // Capture and execute the lockLoop runnable
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
@@ -242,7 +238,6 @@ class ElectorServiceTest {
 
         electorService.start();
 
-        // Capture and execute the lockLoop runnable
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
@@ -253,7 +248,6 @@ class ElectorServiceTest {
 
         // Then
         verify(callbacks, never()).onLockAcquired(any());
-        // Should schedule retry
         verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(Instant.class));
     }
 
@@ -269,14 +263,12 @@ class ElectorServiceTest {
 
         electorService.start();
 
-        // Capture lockLoop and execute to acquire lock
         final ArgumentCaptor<Runnable> lockLoopCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(lockLoopCaptor.capture(), any(Instant.class));
         lockLoopCaptor
                 .getValue()
                 .run();
 
-        // Capture refresh task
         final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
 
@@ -342,14 +334,12 @@ class ElectorServiceTest {
 
         electorService.start();
 
-        // Capture lockLoop and execute to acquire lock
         final ArgumentCaptor<Runnable> lockLoopCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(lockLoopCaptor.capture(), any(Instant.class));
         lockLoopCaptor
                 .getValue()
                 .run();
 
-        // Capture refresh task
         final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
 
@@ -697,7 +687,7 @@ class ElectorServiceTest {
         // When
         electorService.stop();
 
-        // Then - should not throw exception
+        // Then
         verify(lock, never()).unlock();
         // Never held the lock (never led), so there's no self-label to clear.
         verify(callbacks, never()).onShutdown();
@@ -718,7 +708,6 @@ class ElectorServiceTest {
 
         electorService.start();
 
-        // Capture and execute lockLoop
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
         runnableCaptor
@@ -728,8 +717,8 @@ class ElectorServiceTest {
         // When
         electorService.stop();
 
-        // Then - should handle exception gracefully, and still clear the self-label since this pod
-        // was leading regardless of whether the underlying unlock call itself succeeded.
+        // Then: the self-label is cleared because this pod was leading, regardless of whether the
+        // underlying unlock call itself succeeded.
         verify(lock).unlock();
         verify(callbacks).onShutdown();
     }

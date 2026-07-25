@@ -13,9 +13,8 @@ import org.springframework.integration.redis.util.RedisLockRegistry;
 @Configuration
 public class RedisLockRegistryConfiguration {
     /**
-     * @param redisConnectionFactory connection factory for the target Redis instance
-     * @param electorProperties      supplies the lock name (registry key is {@code
-     *                                <lockName>-lock-registry}) and the lease duration
+     * @param electorProperties supplies the lock name (registry key is {@code
+     *                          <lockName>-lock-registry}) and the lease duration
      * @return a {@link RedisLockRegistry} scoped to this application's lock
      */
     @Bean

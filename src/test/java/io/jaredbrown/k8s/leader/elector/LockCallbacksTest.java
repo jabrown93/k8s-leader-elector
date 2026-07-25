@@ -354,11 +354,11 @@ class LockCallbacksTest {
 
     @Test
     void onLockLost_shouldInvokeKubernetesClient() {
-        // Given - mock the full chain needed for onLockLost
+        // Given
         final PodResource podResource = mock(PodResource.class);
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(podResource);
 
-        // When/Then - should not throw
+        // When/Then
         lockCallbacks.onLockLost();
 
         verify(kubernetesClient).getNamespace();

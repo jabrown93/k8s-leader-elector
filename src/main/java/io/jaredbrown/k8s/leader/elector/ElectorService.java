@@ -98,7 +98,6 @@ public class ElectorService implements SmartLifecycle {
         stop();
     }
 
-    /** Cancels the scheduled renewal task, if one is running. */
     private void cancelRefreshTask() {
         final ScheduledFuture<?> future = refreshFuture.getAndSet(null);
         if (future != null && !future.isCancelled()) {
@@ -141,8 +140,6 @@ public class ElectorService implements SmartLifecycle {
             callbacks.onShutdown();
         }
     }
-
-    // --- Refresh logic: interval is configurable via electorProperties.getRenewDeadline() ---
 
     /**
      * @return whether this pod was holding the lock (i.e. was leader), regardless of whether the
@@ -289,7 +286,6 @@ public class ElectorService implements SmartLifecycle {
                        .compareTo(electorProperties.getHealthProbeDeadlockGrace()) >= 0;
     }
 
-    /** Reschedules {@link #lockLoop} after {@code retryPeriod}, if still running. */
     private void scheduleRetry() {
         if (running.get()) {
             taskScheduler.schedule(this::lockLoop,
@@ -312,8 +308,6 @@ public class ElectorService implements SmartLifecycle {
                                            .plus(electorProperties.getHealthProbeUnhealthyBackoff()));
         }
     }
-
-    // --- Lock lost handling & reacquire ---
 
     /** Cancels any existing renewal task and schedules {@link #refreshLock} at {@code renewDeadline}. */
     private void scheduleRefreshTask() {
