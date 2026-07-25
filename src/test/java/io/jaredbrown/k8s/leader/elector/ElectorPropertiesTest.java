@@ -8,8 +8,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Field;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -368,5 +373,37 @@ class ElectorPropertiesTest {
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
         assertTrue(violations.isEmpty());
+    }
+
+    /**
+     * A violation message that names a property nobody can set sends the operator chasing a key
+     * that does not exist, so every {@code elector.<name>} a message mentions must be the field it
+     * is annotating.
+     */
+    @Test
+    void validationMessagesShouldNameTheirOwnProperty() {
+        final Pattern propertyReference = Pattern.compile("elector\\.(\\w+)");
+
+        for (final Field field : ElectorProperties.class.getDeclaredFields()) {
+            for (final Annotation annotation : field.getAnnotations()) {
+                messageOf(annotation)
+                        .map(propertyReference::matcher)
+                        .filter(Matcher::find)
+                        .ifPresent(matcher -> assertEquals(field.getName(),
+                                                           matcher.group(1),
+                                                           "message on " + field.getName() + " names the wrong property"));
+            }
+        }
+    }
+
+    private static Optional<String> messageOf(final Annotation annotation) {
+        try {
+            return Optional.of((String) annotation
+                    .annotationType()
+                    .getMethod("message")
+                    .invoke(annotation));
+        } catch (final ReflectiveOperationException e) {
+            return Optional.empty();
+        }
     }
 }
