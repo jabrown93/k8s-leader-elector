@@ -1,34 +1,25 @@
 #syntax=docker/dockerfile:1
 
-# === Build stage: Install tini and prepare application ===
 FROM dhi.io/amazoncorretto:25.0.4-alpine3.24-dev AS builder
 
-# Install tini for proper signal handling and process management
 RUN apk add --no-cache tini
 
 COPY target/leader-elector-*.jar /app/leader-elector.jar
 
 WORKDIR /app
 
-# === Final stage: Create minimal runtime image ===
 FROM dhi.io/amazoncorretto:25.0.4-alpine3.24
 
 WORKDIR /app
 
-# Copy tini and application from the builder stage
 COPY --from=builder /sbin/tini /sbin/tini
 COPY --from=builder /app/leader-elector.jar /app/leader-elector.jar
 
 # Use tini as init system to handle signals and reap zombie processes
 ENTRYPOINT ["/sbin/tini", "--"]
 
-# Configure JVM for container environment:
-# - UseContainerSupport: Detect container memory/CPU limits
-# - MaxRAMPercentage: Use up to 75% of container memory for heap
-# - InitialRAMPercentage: Start with 50% of container memory for heap
-# - +ExitOnOutOfMemoryError: Exit cleanly on OOM instead of hanging
-# - +HeapDumpOnOutOfMemoryError: Create heap dump on OOM for debugging
-# - HeapDumpPath: Location for heap dumps
+# Heap follows the container's memory limit rather than the host's, and an OOM exits so
+# Kubernetes restarts the pod instead of letting it thrash; the dump survives for diagnosis.
 CMD ["java", \
      "-XX:+UseContainerSupport", \
      "-XX:MaxRAMPercentage=75.0", \

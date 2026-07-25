@@ -11,9 +11,6 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 @ConfigurationPropertiesScan
 public class Application {
 
-    /**
-     * @param args standard Spring Boot command-line arguments
-     */
     public static void main(final String[] args) {
         SpringApplication.run(Application.class, args);
     }

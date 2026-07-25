@@ -26,11 +26,11 @@ public class ElectorProperties {
     private String lockName;
 
     /** Label key used to select the pods this elector labels and reconciles. */
-    @NotBlank(message = "elector.selectorName must be configured")
+    @NotBlank(message = "elector.selectorLabelKey must be configured")
     private String selectorLabelKey;
 
     /** Label value paired with {@link #selectorLabelKey} to select the pods this elector reconciles. */
-    @NotBlank(message = "elector.selectorValue must be configured")
+    @NotBlank(message = "elector.selectorLabelValue must be configured")
     private String selectorLabelValue;
 
     /** Lock TTL in Redis; the lock expires if not renewed within this window. */
@@ -76,9 +76,10 @@ public class ElectorProperties {
 
     /**
      * Consecutive probe failures tolerated while already leader before relinquishing. Absorbs a
-     * transient blip or a normal gravity rebuild without flapping leadership. Must be {@code >= 1}
-     * so a single probe failure cannot immediately demote the leader (0/negative would be
-     * nonsensical).
+     * transient blip, or a routine rebuild in the host application that briefly makes it unfit to
+     * lead (e.g. Pi-hole regenerating its gravity database), without flapping leadership. Must be
+     * {@code >= 1} so a single probe failure cannot immediately demote the leader (0/negative would
+     * be nonsensical).
      */
     @Min(value = 1, message = "elector.healthProbeFailureThreshold must be at least 1")
     private int healthProbeFailureThreshold = 3;

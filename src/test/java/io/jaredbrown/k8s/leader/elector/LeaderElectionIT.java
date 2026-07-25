@@ -26,12 +26,15 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-// Boots real ElectorService instances (full Spring context) against a real Redis (Testcontainers)
-// and a fabric8 mock Kubernetes API server, to exercise the wire-level behavior no unit test can:
-// actual Redis lock contention/release, and the real shutdown-event ordering that
-// TaskSchedulerConfiguration's acceptTasksAfterContextClose(true) exists to fix (see CLAUDE.md's
-// Graceful Shutdown notes). Each "pod" is its own SpringApplicationBuilder-launched context so two
-// pods can race for the same lock within a single test method.
+/**
+ * Boots real {@link ElectorService} instances (full Spring context) against a real Redis
+ * (Testcontainers) and a fabric8 mock Kubernetes API server, to exercise the wire-level behavior no
+ * unit test can: actual Redis lock contention/release, and the real shutdown-event ordering that
+ * {@code TaskSchedulerConfiguration}'s {@code acceptTasksAfterContextClose(true)} exists to fix.
+ *
+ * <p>Each "pod" is its own {@code SpringApplicationBuilder}-launched context, so two pods can race
+ * for the same lock within a single test method.
+ */
 @Testcontainers
 @EnableKubernetesMockClient(crud = true, https = false)
 class LeaderElectionIT {
