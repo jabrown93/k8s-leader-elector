@@ -1,3 +1,12 @@
+## [2.3.1](https://github.com/jabrown93/k8s-leader-elector/compare/v2.3.0...v2.3.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* comment audit cleanup and selector-label validation messages ([#103](https://github.com/jabrown93/k8s-leader-elector/issues/103)) ([f04f959](https://github.com/jabrown93/k8s-leader-elector/commit/f04f9592f222c607f13944b7722f05d55e4f6d8f)), closes [LockCallbacks#reconcileLeaderLabels](https://github.com/LockCallbacks/issues/reconcileLeaderLabels) [TaskSchedulerConfiguration#taskScheduler](https://github.com/TaskSchedulerConfiguration/issues/taskScheduler) [ElectorService#stillOwnsLock](https://github.com/ElectorService/issues/stillOwnsLock) [LockCallbacks#validateSelfPodName](https://github.com/LockCallbacks/issues/validateSelfPodName)
+* **deps:** update dhi.io/amazoncorretto docker tag ([aa3e5ec](https://github.com/jabrown93/k8s-leader-elector/commit/aa3e5ecbbba3efe3ef16d44c94ed89187cdae5b6))
+* **deps:** update dhi.io/amazoncorretto docker tag ([bc3b387](https://github.com/jabrown93/k8s-leader-elector/commit/bc3b3870e02b49fe69465779866e5ed37d0a6b60))
+
 # [2.3.0](https://github.com/jabrown93/k8s-leader-elector/compare/v2.2.1...v2.3.0) (2026-07-17)
 
 

@@ -12,7 +12,7 @@
 
     <groupId>io.jaredbrown.k8s</groupId>
     <artifactId>leader-elector</artifactId>
-    <version>2.3.0</version>
+    <version>2.3.1</version>
 
     <properties>
         <java.version>25</java.version>
