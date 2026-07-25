@@ -76,7 +76,9 @@ public class ElectorProperties {
 
     /**
      * Consecutive probe failures tolerated while already leader before relinquishing. Absorbs a
-     * transient blip or a normal gravity rebuild without flapping leadership. Must be {@code >= 1}
+     * transient blip, or a routine rebuild in the host application that briefly makes it unfit to
+     * lead (e.g. Pi-hole regenerating its gravity database), without flapping leadership. Must be
+     * {@code >= 1}
      * so a single probe failure cannot immediately demote the leader (0/negative would be
      * nonsensical).
      */

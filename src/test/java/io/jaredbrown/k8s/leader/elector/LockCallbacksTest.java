@@ -109,7 +109,6 @@ class LockCallbacksTest {
 
     @Test
     void onLockAcquired_shouldPatchPodsWithJsonMergePatch() {
-        // Given
         final PodResource leaderPodResource = mock(PodResource.class);
         final PodResource followerPodResource = mock(PodResource.class);
         final Pod leaderPod = pod(SELF_POD_NAME);
@@ -121,10 +120,8 @@ class LockCallbacksTest {
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(leaderPodResource);
         when(namespacedPods.withName("pod-2")).thenReturn(followerPodResource);
 
-        // When
         lockCallbacks.onLockAcquired(() -> true);
 
-        // Then
         verify(namespacedPods).withLabel("app", APP_NAME);
         verify(labeledPods).list(any(ListOptions.class));
 
@@ -160,7 +157,6 @@ class LockCallbacksTest {
         when(labeledPods.list(any(ListOptions.class))).thenReturn(podList);
         when(podList.getItems()).thenReturn(List.of(leaderPod, followerPod));
 
-        // When
         lockCallbacks.reconcileLeaderLabels(() -> true);
 
         // Then: idempotent — no pod needed a patch, so none was attempted.
@@ -179,10 +175,8 @@ class LockCallbacksTest {
         when(podList.getItems()).thenReturn(List.of(leaderPod, stalePeerPod));
         when(namespacedPods.withName("pod-2")).thenReturn(peerPodResource);
 
-        // When
         lockCallbacks.reconcileLeaderLabels(() -> true);
 
-        // Then
         verify(namespacedPods, never()).withName(SELF_POD_NAME);
         verify(peerPodResource).patch(any(PatchContext.class), any(Pod.class));
     }
@@ -220,7 +214,6 @@ class LockCallbacksTest {
 
         final AtomicInteger checks = new AtomicInteger();
 
-        // When
         lockCallbacks.reconcileLeaderLabels(() -> {
             checks.incrementAndGet();
             return true;
@@ -246,7 +239,6 @@ class LockCallbacksTest {
 
         final Iterator<Boolean> ownership = List.of(true, false).iterator();
 
-        // When
         lockCallbacks.reconcileLeaderLabels(ownership::next);
 
         // Then: the first pod was patched, but the reconcile halted before touching the second — it
@@ -270,7 +262,6 @@ class LockCallbacksTest {
         when(podList.getItems()).thenReturn(List.of(podWithNoLabels));
         when(namespacedPods.withName("pod-2")).thenReturn(podResource);
 
-        // When
         lockCallbacks.reconcileLeaderLabels(() -> true);
 
         // Then: a null labels map is treated as drifted (current=null != "false") and gets patched.
@@ -279,7 +270,6 @@ class LockCallbacksTest {
 
     @Test
     void reconcileLeaderLabels_shouldNotThrowWhenPodListQueryFails() {
-        // Given
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
         when(labeledPods.list(any(ListOptions.class))).thenThrow(new KubernetesClientException("Failed to list pods"));
 
@@ -308,7 +298,6 @@ class LockCallbacksTest {
         when(namespacedPods.withName("pod-2")).thenReturn(pod2Resource);
         when(namespacedPods.withName("pod-3")).thenReturn(pod3Resource);
 
-        // When
         lockCallbacks.reconcileLeaderLabels(() -> true);
 
         // Then: a second page was fetched using the first page's continuation token, and pods from
@@ -354,11 +343,9 @@ class LockCallbacksTest {
 
     @Test
     void onLockLost_shouldInvokeKubernetesClient() {
-        // Given
         final PodResource podResource = mock(PodResource.class);
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(podResource);
 
-        // When/Then
         lockCallbacks.onLockLost();
 
         verify(kubernetesClient).getNamespace();
@@ -367,7 +354,6 @@ class LockCallbacksTest {
 
     @Test
     void reconcileLeaderLabels_shouldNotThrowWhenLeaderPodLabelUpdateFails() {
-        // Given
         final PodResource leaderPodResource = mock(PodResource.class);
         when(namespacedPods.withLabel("app", APP_NAME)).thenReturn(labeledPods);
         when(labeledPods.list(any(ListOptions.class))).thenReturn(podList);
@@ -383,11 +369,9 @@ class LockCallbacksTest {
 
     @Test
     void ensureSelfLabeled_shouldSetSelfLabelToFalse() {
-        // Given
         final PodResource selfPodResource = mock(PodResource.class);
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(selfPodResource);
 
-        // When
         lockCallbacks.ensureSelfLabeled();
 
         // Then: every pod carries the label from boot, before it has contested any election.
@@ -402,23 +386,19 @@ class LockCallbacksTest {
 
     @Test
     void ensureSelfLabeled_shouldNotThrowWhenPatchFails() {
-        // Given
         final PodResource selfPodResource = mock(PodResource.class);
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(selfPodResource);
         when(selfPodResource.patch(any(PatchContext.class), any(Pod.class)))
                 .thenThrow(new KubernetesClientException("API server unavailable"));
 
-        // When/Then
         assertDoesNotThrow(() -> lockCallbacks.ensureSelfLabeled());
     }
 
     @Test
     void onShutdown_shouldSetSelfLabelToFalse() {
-        // Given
         final PodResource selfPodResource = mock(PodResource.class);
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(selfPodResource);
 
-        // When
         lockCallbacks.onShutdown();
 
         // Then: a departing leader must not stay labeled true through its termination grace period.
@@ -433,13 +413,11 @@ class LockCallbacksTest {
 
     @Test
     void onShutdown_shouldNotThrowWhenPatchFails() {
-        // Given
         final PodResource selfPodResource = mock(PodResource.class);
         when(namespacedPods.withName(SELF_POD_NAME)).thenReturn(selfPodResource);
         when(selfPodResource.patch(any(PatchContext.class), any(Pod.class)))
                 .thenThrow(new KubernetesClientException("API server unavailable"));
 
-        // When/Then
         assertDoesNotThrow(() -> lockCallbacks.onShutdown());
     }
 

@@ -61,6 +61,69 @@ Application.main() -> Spring context startup -> ElectorService.start() (SmartLif
 
 ## Extended Sections (Optional)
 
+### Leader-Label Reconcile: Pagination and Ownership Re-Confirmation
+
+`LockCallbacks.reconcileLeaderLabels(stillLeader)` lists matching pods in pages of
+`RECONCILE_LIST_PAGE_SIZE` (500, matching client-go's own default chunk size) and patches each
+page's drifted pods before fetching the next, rather than buffering the whole match set. Both
+choices bound an attacker-inflated matching-pod count: an unpaginated `list()` could exceed
+`K8sClientConfiguration`'s 2s request timeout outright, and buffering every page before patching
+would leave heap usage unbounded even though each individual request stays small. Page-by-page
+processing bounds peak memory to one page regardless of total match count.
+
+`stillLeader` (wired to `ElectorService#stillOwnsLock`) re-confirms leadership immediately before
+mutating each drifted pod, and again before fetching another page:
+
+- A reconcile can outlive the lease — very slow API server, many drifted pods, or simply many
+  pages. Stamping labels after another pod has taken over would flip the new leader's label back to
+  `false` and leave the deployment momentarily leaderless.
+- Unconditionally continued pagination could stall the single scheduler thread past
+  `renewDeadline`.
+- Every `stillLeader` call except the last also renews the Redis lease as a side effect, so a long
+  but still legitimate multi-page reconcile keeps its lease alive instead of racing it.
+- The pre-next-page check only fires when another page remains, so the common single-page case
+  issues no extra Redis call beyond what patching already needs.
+
+`stillOwnsLock` also gates on `running`: `renewLock` alone would keep succeeding straight through
+shutdown, letting a many-page reconcile stall the scheduler thread past `stop()`'s 5s
+`RELEASE_TIMEOUT`. This matters most for the acquisition-time reconcile
+(`becomeLeader` → `onLockAcquired`), which runs before `scheduleRefreshTask()` creates
+`refreshFuture` — `cancelRefreshTask()` has nothing to interrupt yet, so the `running` check is the
+only thing that can cut that reconcile short and let the queued lock-release task run.
+
+### Why the Scheduler Accepts Tasks After Context Close
+
+`TaskSchedulerConfiguration` sets `setAcceptTasksAfterContextClose(true)`, which is required rather
+than cosmetic. `ExecutorConfigurationSupport` listens for `ContextClosedEvent` and by default calls
+`executor.shutdown()` there — and that event is published and handled synchronously *before* Spring
+invokes any `SmartLifecycle#stop()` (see `AbstractApplicationContext#doClose`: the
+`ContextClosedEvent` publish precedes `lifecycleProcessor.onClose()`). Since `ElectorService.stop()`
+submits the shutdown-time lock release to this same scheduler, without the flag that `submit()`
+would always throw `TaskRejectedException` and the lock would leak on every graceful shutdown — the
+exact failure the thread-pinning exists to prevent. Setting it defers the executor's shutdown to its
+later `DisposableBean` callback, which runs after all `SmartLifecycle` beans have stopped.
+
+### Health Status File: Hardening and Read Bounds
+
+`HealthProbe.isHealthy()` checks file type, readability, freshness, and content in separate
+filesystem calls, not one atomic read. Consequences:
+
+- **Writer contract.** The application must write a temporary file in the same directory and
+  atomically rename it into place (`Files.move(tmp, target, ATOMIC_MOVE)`), never write the target
+  in place — otherwise the probe can observe a partially-written file and report a spurious,
+  transient unhealthy.
+- **File type.** Only a regular file is accepted; a FIFO, socket, device file, directory, or symlink
+  is reported unhealthy without being opened, so a symlink planted at the configured path cannot
+  redirect the read to any other file the process can access. On a content mismatch only a fixed
+  message is logged, never the file's contents, so the probe cannot exfiltrate file data into
+  application logs.
+- **Read timeout.** Because the type check and the read are separate calls, a co-located writer that
+  swaps in a FIFO between them can still route the read into a blocking `open()`. The read therefore
+  runs on a single background thread bounded by `readTimeout`, so a blocked open wedges only that
+  thread, which is abandoned rather than interrupted (a blocking FIFO open is not interruptible). A
+  timed-out read replaces the executor, so a later call — once the path is a normal file again —
+  gets a usable thread instead of queuing behind the abandoned task forever.
+
 ### Startup/Shutdown Ordering Detail
 
 1. Spring context refresh → `@ConfigurationPropertiesScan` binds and validates `ElectorProperties` (startup fails fast on missing `elector.labelKey`/`lockName`/`selectorLabelKey`/`selectorLabelValue` or invalid durations — `ElectorProperties.java:17-39`).

@@ -111,10 +111,8 @@ class ElectorServiceTest {
 
     @Test
     void start_shouldSetRunningAndScheduleLockLoop() {
-        // When
         electorService.start();
 
-        // Then
         assertTrue(electorService.isRunning());
         verify(taskScheduler).schedule(any(Runnable.class), any(Instant.class));
         // Every pod carries the label from boot, before it has contested any election.
@@ -123,20 +121,16 @@ class ElectorServiceTest {
 
     @Test
     void stop_shouldSetRunningToFalseAndReleaseLock() {
-        // Given
         electorService.start();
 
-        // When
         electorService.stop();
 
-        // Then
         assertFalse(electorService.isRunning());
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void lockLoop_shouldAcquireLockAndInvokeCallbacks() throws Exception {
-        // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
         when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
@@ -148,12 +142,10 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
-        // When
         runnableCaptor
                 .getValue()
                 .run();
 
-        // Then
         verify(lockRegistry).obtain("test-lock");
         verify(lock).tryLock(5L, TimeUnit.SECONDS);
         verify(callbacks).onLockAcquired(any());
@@ -162,7 +154,6 @@ class ElectorServiceTest {
 
     @Test
     void lockLoop_shouldReleaseLockAndRetryWhenLockAcquiredCallbackFails() throws Exception {
-        // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
         doThrow(new IllegalStateException("failed to label elected pod"))
@@ -174,12 +165,10 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
-        // When
         runnableCaptor
                 .getValue()
                 .run();
 
-        // Then
         verify(callbacks).onLockAcquired(any());
         verify(lock).unlock();
         verify(taskScheduler, never()).scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class));
@@ -188,7 +177,6 @@ class ElectorServiceTest {
 
     @Test
     void lockLoop_shouldRetryWhenLockNotAcquired() throws Exception {
-        // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(false);
 
@@ -197,12 +185,10 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
-        // When
         runnableCaptor
                 .getValue()
                 .run();
 
-        // Then
         verify(lockRegistry).obtain("test-lock");
         verify(lock).tryLock(5L, TimeUnit.SECONDS);
         verify(callbacks, never()).onLockAcquired(any());
@@ -211,7 +197,6 @@ class ElectorServiceTest {
 
     @Test
     void lockLoop_shouldHandleInterruptedException() throws Exception {
-        // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(anyLong(), any(TimeUnit.class))).thenThrow(new InterruptedException("Test interruption"));
 
@@ -220,19 +205,16 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
-        // When
         runnableCaptor
                 .getValue()
                 .run();
 
-        // Then
         verify(callbacks, never()).onLockAcquired(any());
         assertTrue(Thread.interrupted()); // Verify interrupt flag is set
     }
 
     @Test
     void lockLoop_shouldRetryOnException() throws Exception {
-        // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(anyLong(), any(TimeUnit.class))).thenThrow(new RuntimeException("Test exception"));
 
@@ -241,12 +223,10 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
-        // When
         runnableCaptor
                 .getValue()
                 .run();
 
-        // Then
         verify(callbacks, never()).onLockAcquired(any());
         verify(taskScheduler, times(2)).schedule(any(Runnable.class), any(Instant.class));
     }
@@ -254,7 +234,6 @@ class ElectorServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void refreshLock_shouldRenewLock() throws Exception {
-        // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
         when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
@@ -272,12 +251,10 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
 
-        // When
         refreshCaptor
                 .getValue()
                 .run();
 
-        // Then
         verify(lockRegistry).renewLock("test-lock", Duration.ofSeconds(120));
         // Self-heals any label a prior attempt failed to set, every renewal tick.
         verify(callbacks).reconcileLeaderLabels(any());
@@ -308,7 +285,6 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
 
-        // When
         refreshCaptor
                 .getValue()
                 .run();
@@ -343,7 +319,6 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
 
-        // When
         refreshCaptor
                 .getValue()
                 .run();
@@ -357,13 +332,10 @@ class ElectorServiceTest {
 
     @Test
     void onDestroy_shouldCallStop() {
-        // Given
         electorService.start();
 
-        // When
         electorService.onDestroy();
 
-        // Then
         assertFalse(electorService.isRunning());
     }
 
@@ -381,7 +353,6 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
-        // When
         runnableCaptor
                 .getValue()
                 .run();
@@ -419,7 +390,6 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
-        // When
         runnableCaptor
                 .getValue()
                 .run();
@@ -446,7 +416,6 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
-        // When
         runnableCaptor
                 .getValue()
                 .run();
@@ -472,7 +441,6 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
-        // When
         runnableCaptor
                 .getValue()
                 .run();
@@ -503,7 +471,6 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(runnableCaptor.capture(), any(Instant.class));
 
-        // When
         runnableCaptor
                 .getValue()
                 .run();
@@ -535,7 +502,6 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
 
-        // When
         refreshCaptor
                 .getValue()
                 .run();
@@ -568,7 +534,6 @@ class ElectorServiceTest {
         final ArgumentCaptor<Runnable> refreshCaptor = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).scheduleAtFixedRate(refreshCaptor.capture(), any(Instant.class), any(Duration.class));
 
-        // When
         refreshCaptor
                 .getValue()
                 .run();
@@ -675,19 +640,15 @@ class ElectorServiceTest {
 
     @Test
     void getPhase_shouldReturnIntegerMinValue() {
-        // When
         final int phase = electorService.getPhase();
 
-        // Then
         assertEquals(Integer.MIN_VALUE, phase);
     }
 
     @Test
     void releaseLockIfHeld_shouldHandleNullLock() {
-        // When
         electorService.stop();
 
-        // Then
         verify(lock, never()).unlock();
         // Never held the lock (never led), so there's no self-label to clear.
         verify(callbacks, never()).onShutdown();
@@ -696,7 +657,6 @@ class ElectorServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void releaseLockIfHeld_shouldHandleUnlockException() throws Exception {
-        // Given
         when(lockRegistry.obtain("test-lock")).thenReturn(lock);
         when(lock.tryLock(5L, TimeUnit.SECONDS)).thenReturn(true);
         when(taskScheduler.scheduleAtFixedRate(any(Runnable.class),
@@ -714,7 +674,6 @@ class ElectorServiceTest {
                 .getValue()
                 .run();
 
-        // When
         electorService.stop();
 
         // Then: the self-label is cleared because this pod was leading, regardless of whether the
@@ -743,10 +702,8 @@ class ElectorServiceTest {
                 .getValue()
                 .run();
 
-        // When
         electorService.stop();
 
-        // Then
         verify(taskScheduler).submit(any(Runnable.class));
         verify(lock).unlock();
         // This pod was leading, so its self-label must be cleared rather than left true for the

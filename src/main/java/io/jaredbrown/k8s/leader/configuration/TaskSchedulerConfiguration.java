@@ -14,24 +14,12 @@ import java.time.Clock;
 @Configuration
 public class TaskSchedulerConfiguration {
     /**
-     * @return a daemon {@link ThreadPoolTaskScheduler} pinned to a single thread.
-     * <p>{@code DistributedLock.unlock()} is thread-owned (see {@code
-     * ElectorService#awaitLockRelease}): a pool size above 1 would let lock acquisition
-     * ({@code lockLoop}) and renewal/release ({@code refreshLock}) run on different worker
-     * threads, throwing {@code IllegalStateException} off the acquiring thread. A single thread
-     * keeps every lock operation sequential and on the same thread by construction.
-     * <p>{@code setAcceptTasksAfterContextClose(true)} is required, not cosmetic:
-     * {@code ExecutorConfigurationSupport} listens for {@code ContextClosedEvent} and, by default,
-     * calls {@code executor.shutdown()} right there — published (and handled synchronously)
-     * BEFORE Spring invokes any {@code SmartLifecycle#stop()} (see
-     * {@code AbstractApplicationContext#doClose}: the {@code ContextClosedEvent} publish precedes
-     * {@code lifecycleProcessor.onClose()}). Since {@code ElectorService}'s own {@code stop()}
-     * submits the shutdown-time lock release to this same scheduler, without this flag that
-     * {@code submit()} call would always throw {@code TaskRejectedException} and the lock would
-     * leak every graceful shutdown — the exact bug this scheduler's thread-pinning exists to
-     * avoid. Setting this defers the executor's shutdown to its later
-     * {@code @PreDestroy}/{@code DisposableBean} callback, which runs after all
-     * {@code SmartLifecycle} beans have stopped.
+     * @return a daemon {@link ThreadPoolTaskScheduler} pinned to a single thread, because
+     * {@code DistributedLock.unlock()} is thread-owned: a larger pool would let acquisition
+     * ({@code lockLoop}) and renewal/release ({@code refreshLock}) land on different threads and
+     * throw {@code IllegalStateException}. {@code acceptTasksAfterContextClose} keeps the executor
+     * alive long enough for {@code ElectorService#stop()} to submit its lock release — see "Why the
+     * Scheduler Accepts Tasks After Context Close" in {@code docs/codebase/ARCHITECTURE.md}.
      */
     @Nonnull
     @Bean

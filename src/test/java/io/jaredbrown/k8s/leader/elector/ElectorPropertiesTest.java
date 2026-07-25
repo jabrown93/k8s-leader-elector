@@ -34,10 +34,8 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldHaveDefaultValues() {
-        // When
         final ElectorProperties properties = new ElectorProperties();
 
-        // Then
         assertEquals(Duration.ofSeconds(120), properties.getLeaseDuration());
         assertEquals(Duration.ofSeconds(60), properties.getRenewDeadline());
         assertEquals(Duration.ofSeconds(5), properties.getRetryPeriod());
@@ -45,7 +43,6 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldHaveHealthProbeDisabledByDefault() {
-        // When
         final ElectorProperties properties = new ElectorProperties();
 
         // Then — disabled with safe defaults so probe-less consumers are unaffected
@@ -60,10 +57,8 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldAllowSettingAllProperties() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
 
-        // When
         properties.setLabelKey("my-label");
         properties.setLockName("my-lock");
         properties.setSelectorLabelKey("app");
@@ -72,7 +67,6 @@ class ElectorPropertiesTest {
         properties.setRenewDeadline(Duration.ofSeconds(90));
         properties.setRetryPeriod(Duration.ofSeconds(10));
 
-        // Then
         assertEquals("my-label", properties.getLabelKey());
         assertEquals("my-lock", properties.getLockName());
         assertEquals("app", properties.getSelectorLabelKey());
@@ -84,16 +78,13 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenLabelKeyIsNull() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey(null);
         properties.setLockName("test-lock");
         properties.setSelectorLabelValue("test-app");
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertFalse(violations.isEmpty());
         assertTrue(violations
                            .stream()
@@ -105,16 +96,13 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenLabelKeyIsBlank() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("  ");
         properties.setLockName("test-lock");
         properties.setSelectorLabelValue("test-app");
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertFalse(violations.isEmpty());
         assertTrue(violations
                            .stream()
@@ -126,16 +114,13 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenLockNameIsNull() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName(null);
         properties.setSelectorLabelValue("test-app");
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertFalse(violations.isEmpty());
         assertTrue(violations
                            .stream()
@@ -147,16 +132,13 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenLockNameIsBlank() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("");
         properties.setSelectorLabelValue("test-app");
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertFalse(violations.isEmpty());
         assertTrue(violations
                            .stream()
@@ -168,16 +150,13 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenAppNameIsNull() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
         properties.setSelectorLabelValue(null);
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertFalse(violations.isEmpty());
         assertTrue(violations
                            .stream()
@@ -189,16 +168,13 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenAppNameIsBlank() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
         properties.setSelectorLabelValue("   ");
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertFalse(violations.isEmpty());
         assertTrue(violations
                            .stream()
@@ -210,17 +186,14 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenLeaseDurationIsNull() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
         properties.setSelectorLabelValue("test-app");
         properties.setLeaseDuration(null);
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertFalse(violations.isEmpty());
         assertTrue(violations
                            .stream()
@@ -232,17 +205,14 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenRenewDeadlineIsNull() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
         properties.setSelectorLabelValue("test-app");
         properties.setRenewDeadline(null);
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertFalse(violations.isEmpty());
         assertTrue(violations
                            .stream()
@@ -254,17 +224,14 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenRetryPeriodIsNull() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
         properties.setSelectorLabelValue("test-app");
         properties.setRetryPeriod(null);
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertFalse(violations.isEmpty());
         assertTrue(violations
                            .stream()
@@ -276,17 +243,14 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenHealthProbeUnhealthyBackoffIsNull() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
         properties.setSelectorLabelValue("test-app");
         properties.setHealthProbeUnhealthyBackoff(null);
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertFalse(violations.isEmpty());
         assertTrue(violations
                            .stream()
@@ -298,14 +262,11 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenLeaseDurationIsZero() {
-        // Given
         final ElectorProperties properties = validProperties();
         properties.setLeaseDuration(Duration.ZERO);
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertTrue(violations
                            .stream()
                            .anyMatch(v -> v
@@ -316,14 +277,11 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenRenewDeadlineIsNegative() {
-        // Given
         final ElectorProperties properties = validProperties();
         properties.setRenewDeadline(Duration.ofSeconds(-1));
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertTrue(violations
                            .stream()
                            .anyMatch(v -> v
@@ -338,10 +296,8 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = validProperties();
         properties.setRetryPeriod(Duration.ZERO);
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertTrue(violations
                            .stream()
                            .anyMatch(v -> v
@@ -352,14 +308,11 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenHealthProbeUnhealthyBackoffIsZero() {
-        // Given
         final ElectorProperties properties = validProperties();
         properties.setHealthProbeUnhealthyBackoff(Duration.ZERO);
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertTrue(violations
                            .stream()
                            .anyMatch(v -> v
@@ -370,14 +323,11 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldFailValidationWhenHealthProbeDeadlockGraceIsNegative() {
-        // Given
         final ElectorProperties properties = validProperties();
         properties.setHealthProbeDeadlockGrace(Duration.ofSeconds(-1));
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertTrue(violations
                            .stream()
                            .anyMatch(v -> v
@@ -393,10 +343,8 @@ class ElectorPropertiesTest {
         final ElectorProperties properties = validProperties();
         properties.setHealthProbeDeadlockGrace(Duration.ZERO);
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertTrue(violations.isEmpty());
     }
 
@@ -411,17 +359,14 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldPassValidationWhenAllRequiredFieldsAreSet() {
-        // Given
         final ElectorProperties properties = new ElectorProperties();
         properties.setLabelKey("test-label");
         properties.setLockName("test-lock");
         properties.setSelectorLabelKey("app");
         properties.setSelectorLabelValue("test-app");
 
-        // When
         final Set<ConstraintViolation<ElectorProperties>> violations = validator.validate(properties);
 
-        // Then
         assertTrue(violations.isEmpty());
     }
 }

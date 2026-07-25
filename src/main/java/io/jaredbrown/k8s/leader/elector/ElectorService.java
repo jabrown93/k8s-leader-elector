@@ -332,7 +332,8 @@ public class ElectorService implements SmartLifecycle {
         }
         try {
             // Relinquish leadership if we go unhealthy while leading, but only after a run of
-            // failures so a transient blip (or a normal gravity rebuild) doesn't cause flapping.
+            // failures so a transient blip, or a routine rebuild in the host application, doesn't
+            // cause flapping.
             // isHealthy() returns true when probing is disabled, so this is a no-op then.
             if (!healthProbe.isHealthy()) {
                 final int failures = consecutiveProbeFailures.incrementAndGet();
@@ -394,21 +395,10 @@ public class ElectorService implements SmartLifecycle {
 
     /**
      * Re-confirms this pod still holds the Redis lock, and refreshes its lease as a side effect.
-     * Passed into {@code LockCallbacks#reconcileLeaderLabels} so a long-running label reconcile
-     * stops the moment ownership is lost instead of stamping stale labels. {@code renewLock}'s Lua
-     * script only extends the key while Redis still maps it to THIS registry's client id, so a
-     * thrown/false result is a genuine "no longer the owner" signal (a lapsed lease another pod
-     * already took), not just local state — a purely local check can't see a Redis-side takeover.
-     * Runs on the scheduler thread, the same thread as the reconcile that calls it.
-     *
-     * <p>Also gates on {@code running}: {@code renewLock} alone would keep succeeding straight
-     * through shutdown, letting a reconcile spanning many pod-list pages stall the single scheduler
-     * thread well past {@code stop()}'s 5s {@link #RELEASE_TIMEOUT}. This matters most for the
-     * acquisition-time reconcile ({@code becomeLeader -> onLockAcquired}), which runs before
-     * {@link #scheduleRefreshTask()} creates {@code refreshFuture} — {@link #cancelRefreshTask()}
-     * has nothing to interrupt yet at that point, so this running check is the only thing that can
-     * cut a long reconcile short once {@code stop()} has fired, letting the queued lock-release
-     * task run promptly.
+     * {@code renewLock}'s Lua script only extends the key while Redis still maps it to THIS
+     * registry's client id, so a failure is a genuine Redis-side takeover signal that no local
+     * check could see. Also gates on {@code running} so a long reconcile cannot outlive
+     * {@code stop()}. See "Leader-Label Reconcile" in {@code docs/codebase/ARCHITECTURE.md}.
      *
      * @return whether this pod's ownership of the lock was confirmed
      */

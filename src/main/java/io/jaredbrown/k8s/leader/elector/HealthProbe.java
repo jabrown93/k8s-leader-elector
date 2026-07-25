@@ -33,19 +33,10 @@ import java.util.concurrent.TimeoutException;
  * in place - otherwise this probe can observe a partially-written file and report a spurious,
  * transient "unhealthy".
  *
- * <p><b>File type:</b> only a regular file (not a symlink) is accepted — anything else, including
- * a FIFO, socket, device file, directory, or symlink, is reported unhealthy without being opened.
- * This keeps a symlink from redirecting the read to an arbitrary file the elector process can
- * access. On a content mismatch, only a fixed message is logged, never the file's raw content, so
- * this probe cannot be used to exfiltrate file contents into application logs.
- *
- * <p><b>Read timeout:</b> the file-type check and the read are two separate filesystem calls, so a
- * co-located writer that replaces the file with a FIFO in between can still route the read into a
- * blocking {@code open()}. The read therefore runs on a single background thread bounded by
- * {@link #readTimeout}, so a blocked open can never wedge the caller — only that background
- * thread, which is abandoned (not interrupted, since a blocking FIFO open is not interruptible). A
- * timed-out read replaces the executor with a fresh one, so a later call - once the path is a
- * normal file again - gets a usable thread instead of queuing forever behind the abandoned task.
+ * <p>Only a regular file is accepted (never a symlink, FIFO, socket, device, or directory) and the
+ * read is bounded by {@link #readTimeout} on a background thread, so neither a planted symlink nor
+ * a FIFO swapped in mid-check can redirect or wedge the read. See "Health Status File" in
+ * {@code docs/codebase/ARCHITECTURE.md}.
  */
 @Slf4j
 @Component

@@ -80,29 +80,14 @@ public class LockCallbacks {
      * labeling problem is a side effect of leadership, not a reason to give it up, and the next
      * renewal tick (at most {@code renewDeadline} away) retries automatically.
      *
-     * <p>Paginated ({@link #RECONCILE_LIST_PAGE_SIZE} per page, matching client-go's own default
-     * chunk size) and patches each page's drifted pods before fetching the next, rather than
-     * buffering the whole match set first. Both are attacker-inflated-pod-count defenses: an
-     * unpaginated {@code list()} could exceed {@code K8sClientConfiguration}'s 2s request timeout
-     * outright, and buffering every page before patching would leave heap usage unbounded even
-     * though each individual request stays small. Processing page-by-page bounds peak memory to
-     * one page's worth of pods regardless of total match count.
+     * <p>Lists in pages of {@link #RECONCILE_LIST_PAGE_SIZE} and patches each page before fetching
+     * the next, bounding both per-request time and peak memory against an inflated matching-pod
+     * count. See "Leader-Label Reconcile" in {@code docs/codebase/ARCHITECTURE.md}.
      *
-     * @param stillLeader re-confirms leadership (Redis-side; see {@code
-     *                     ElectorService#stillOwnsLock}) immediately before mutating each drifted
-     *                     pod, and again before fetching another page. A reconcile that outlives
-     *                     the lease — a very slow API server, many drifted pods, or simply many
-     *                     pages — must not keep stamping this pod's stale identity (or keep
-     *                     paginating at all) after another pod has taken over the lock: stamping
-     *                     stale labels would flip the new leader's label back to false and leave
-     *                     the deployment momentarily leaderless, and unconditionally continued
-     *                     pagination could stall the single scheduler thread past
-     *                     {@code renewDeadline}. Every {@code stillLeader} call besides the last
-     *                     also renews the Redis lease as a side effect, so a long-but-still-
-     *                     legitimate multi-page reconcile keeps the lease alive instead of racing
-     *                     it. The pre-next-page check only fires when another page remains, so the
-     *                     common single-page case issues no extra Redis call beyond what patching
-     *                     already needs.
+     * @param stillLeader re-confirms leadership Redis-side (see {@code
+     *                    ElectorService#stillOwnsLock}) before mutating each drifted pod and before
+     *                    fetching another page, so a reconcile that outlives the lease stops
+     *                    instead of stamping stale labels over the new leader's
      */
     public void reconcileLeaderLabels(final BooleanSupplier stillLeader) {
         final String namespace = kubernetesClient.getNamespace();
