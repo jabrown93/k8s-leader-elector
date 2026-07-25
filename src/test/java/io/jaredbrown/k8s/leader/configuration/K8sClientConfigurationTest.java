@@ -9,10 +9,8 @@ class K8sClientConfigurationTest {
 
     @Test
     void kubernetesClient_shouldBoundRequestTimeoutAndRetries() {
-        // fabric8 defaults to a 10s request timeout and up to 10 retries; every K8s call runs
-        // inline on ElectorService's single scheduler thread, so these must stay tightly bounded
-        // (see K8sClientConfiguration's class comment) or a slow API server could stall lock
-        // renewal past the lease or the shutdown-time release past its window.
+        // Guards the bounds against a silent revert to fabric8's 10s/10-retry defaults; see
+        // K8sClientConfiguration's class comment for why they matter.
         try (KubernetesClient client = new K8sClientConfiguration().kubernetesClient()) {
             assertEquals(2000, client.getConfiguration().getRequestTimeout());
             assertEquals(1, client.getConfiguration().getRequestRetryBackoffLimit());

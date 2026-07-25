@@ -338,8 +338,8 @@ class ElectorPropertiesTest {
 
     @Test
     void shouldPassValidationWhenHealthProbeDeadlockGraceIsZero() {
-        // Given: zero is a deliberate, tested value (breaks the deadlock immediately) - must remain
-        // legal even though negative values (which behave identically) are now rejected.
+        // Given: zero is a deliberate value (breaks the deadlock immediately) and must stay legal,
+        // even though negative values - which behave identically - are rejected as typos.
         final ElectorProperties properties = validProperties();
         properties.setHealthProbeDeadlockGrace(Duration.ZERO);
 

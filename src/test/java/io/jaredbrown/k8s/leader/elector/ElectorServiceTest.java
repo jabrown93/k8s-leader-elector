@@ -72,7 +72,7 @@ class ElectorServiceTest {
         clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         electorService = new ElectorService(callbacks, electorProperties, lockRegistry, taskScheduler, healthProbe, clock);
 
-        // Default to healthy so the existing (probe-agnostic) tests behave exactly as before; the
+        // Default to healthy so probe-agnostic tests are unaffected by the health gate; the
         // health-gate tests below override this per case.
         lenient()
                 .when(healthProbe.isHealthy())

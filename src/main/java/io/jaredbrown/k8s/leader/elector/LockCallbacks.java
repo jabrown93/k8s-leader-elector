@@ -50,9 +50,9 @@ public class LockCallbacks {
      * Fails startup if {@code POD_NAME} is blank.
      *
      * <p>{@code @Value} above only rejects a totally absent property; {@code POD_NAME=""} resolves
-     * successfully and would silently reproduce the same bug removing the "unknown" default was
-     * meant to fix - every {@code pod.getMetadata().getName().equals(selfPodName)} comparison below
-     * would fail, so this pod would never match "isLeader" even while holding the Redis lock.
+     * successfully, and every {@code pod.getMetadata().getName().equals(selfPodName)} comparison
+     * below would then fail, so this pod would never match "isLeader" even while holding the Redis
+     * lock.
      */
     @PostConstruct
     void validateSelfPodName() {
