@@ -14,7 +14,7 @@
 | `.github/workflows/` | CI, CodeQL, SBOM, PR license check, release automation (7 workflow files) | `.github/workflows/*.yml` |
 | `Dockerfile` | Multi-stage build producing the runtime image (tini + JRE + jar) | `Dockerfile` |
 | `Makefile` | `build`/`docker-build`/`docker-release` targets | `Makefile` |
-| `.releaserc.json` / `package.json` / `package-lock.json` | semantic-release configuration and its npm-only tooling (CI, no runtime JS) | `.releaserc.json`, `package.json:4` |
+| `.releaserc.json` / `package.json` / `package-lock.json` | semantic-release configuration and its npm-only tooling (CI, no runtime JS) | `.releaserc.json`, `package.json` |
 | `docs/codebase/` | This generated documentation set | (this directory) |
 | `.idea/` | JetBrains IDE project settings, including shared code style (`codeStyles/Project.xml`) | `.idea/` |
 
@@ -22,7 +22,7 @@
 
 - Main runtime entry: `src/main/java/io/jaredbrown/k8s/leader/Application.java` — `@SpringBootApplication` + `@ConfigurationPropertiesScan`, `main()` calls `SpringApplication.run`.
 - Secondary entry points: none — this is a single-process sidecar binary with no CLI subcommands, workers, or scheduled jobs outside the one `ElectorService` lifecycle bean.
-- How entry is selected: `pom.xml`'s `spring-boot-maven-plugin` sets `<mainClass>${main.class}</mainClass>` = `io.jaredbrown.k8s.leader.Application` (`pom.xml:21,105-111`); the Docker image runs the resulting jar directly (`Dockerfile:32-40`).
+- How entry is selected: `pom.xml`'s `spring-boot-maven-plugin` sets `<mainClass>${main.class}</mainClass>` = `io.jaredbrown.k8s.leader.Application` (`pom.xml`); the Docker image runs the resulting jar directly (`Dockerfile`).
 
 ### 3) Module Boundaries
 
@@ -45,7 +45,7 @@
 
 - `docs/codebase/.codebase-scan.txt` (directory tree)
 - `src/main/java/io/jaredbrown/k8s/leader/Application.java`
-- `pom.xml:103-111`
+- `pom.xml`
 
 ## Extended Sections (Optional)
 
